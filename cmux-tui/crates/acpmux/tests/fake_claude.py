@@ -499,6 +499,16 @@ while True:
         if request.get("subtype") == "initialize" and os.environ.get("FAKE_CLAUDE_INIT_DELAY_MS"):
             import time
             time.sleep(int(os.environ["FAKE_CLAUDE_INIT_DELAY_MS"]) / 1000)
+        if request.get("subtype") == "set_permission_mode" and os.environ.get("FAKE_CLAUDE_MODE_DELAY_MS"):
+            import time
+            time.sleep(int(os.environ["FAKE_CLAUDE_MODE_DELAY_MS"]) / 1000)
+        if request.get("subtype") == "initialize" and os.environ.get("FAKE_CLAUDE_IDLE_CHILDREN"):
+            import subprocess
+            children = [subprocess.Popen([sys.executable, "-c", "import time; time.sleep(600)"],
+                        start_new_session=escape, stdin=subprocess.DEVNULL,
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).pid for escape in (False, True)]
+            with open(os.environ["FAKE_CLAUDE_IDLE_CHILDREN"], "a") as f:
+                f.write(json.dumps(children) + "\n")
         answer = {}
         if request.get("subtype") == "initialize" and SKILLS:
             answer = {"commands": COMMANDS}
