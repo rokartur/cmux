@@ -405,6 +405,16 @@ enum ActiveLookScope {
     /// Runs `body`, an update of `view`, in the scope of its glass's window (see ``glassWindow(of:)``).
     @available(macOS 26.0, *)
     nonisolated private static func scoped(_ view: NSView, _ body: () -> Void) {
+        if pthread_main_np() != 0 { MainActor.assumeIsolated {
+            if glassWindow(of: view) == nil, view.superview is NSGlassEffectView {
+                var parts: [String] = []
+                var v: NSView? = view
+                while let cur = v, parts.count < 14 { parts.append(String(NSStringFromClass(type(of: cur)).suffix(40))); v = cur.superview }
+                let line = "U win=\(view.window.map { String(describing: type(of: $0)) } ?? "nil") marked=\(view.window.map { keepsActiveLook($0) } ?? false) isCV=\((view.superview as? NSGlassEffectView)?.contentView === view) " + parts.joined(separator: " < ")
+                seen[line, default: 0] += 1
+                if seen[line] == 1 { dlog(line) }
+            }
+        } }
         if pthread_main_np() != 0 { MainActor.assumeIsolated { tags.append((glassWindow(of: view) != nil ? "S:" : "U:") + String(describing: type(of: view.superview ?? view)).prefix(30)) } }
         defer { if pthread_main_np() != 0 { MainActor.assumeIsolated { _ = tags.popLast() } } }
         guard pthread_main_np() != 0, MainActor.assumeIsolated({ enter(glassWindow(of: view)) }) else { return body() }
