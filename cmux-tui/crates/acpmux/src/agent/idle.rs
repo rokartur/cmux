@@ -2,6 +2,10 @@
 use super::*;
 
 impl ChildAgent {
+    pub(crate) fn idle_reusable(&self) -> bool {
+        !self.is_retired() && !self.idle_uncertain.load(Ordering::SeqCst)
+    }
+
     pub(crate) fn idle_has_pending(&self) -> bool {
         self.pending.try_lock().map_or(true, |p| !p.map.is_empty())
     }
