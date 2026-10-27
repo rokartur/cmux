@@ -123,7 +123,7 @@ import Testing
                                      defaults: UserDefaults(suiteName: "UpdateRelaunchMomentTests.\(UUID().uuidString)")!,
                                      enableSparkle: false, recordsUpdates: false)
         // The test runner has no modal, sheet, menu or composition up: the install starts now.
-        #expect(!updater.updaterDefersAutomaticInstall(until: {}))
+        let deferred = updater.updaterDefersAutomaticInstall(until: {}); #expect(!deferred)
         #expect(!updater.relaunchMomentHold.isHolding)
     }
 
