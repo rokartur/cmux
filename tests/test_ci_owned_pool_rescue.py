@@ -129,7 +129,7 @@ class FakeAPI:
         self.calls.append(f"branch:{branch}")
         return self.head
 
-    def cancel(self, run_id):
+    def cancel(self, run_id, before_retry=None):
         self.calls.append("cancel")
         self.cancelled_at, self.cancel_attempt = self.clock.seconds, self.attempt
         self.first_cancel = getattr(self, "first_cancel", None) or self.clock.seconds
@@ -2557,24 +2557,78 @@ class Nightly(unittest.TestCase):
             self.assertTrue(result.startswith(rescue.NIGHTLY_BUSY), result)
             self.assertIn("publish-nightly", result)
 
-    def test_the_watch_resumes_and_moves_the_build_once_the_late_sibling_ends(self):
-        # The look sees nothing else running; then a Linux sibling starts before the cancel and ends at 600 s.
+    def late_sibling_api(self, *, stalled_from_sibling=False, retry=False):
+        """Nightly: the build stuck on the trusted pool, nothing else running at the look; a Linux sibling starts
+        right after it (at the first superseded check, which every rescue makes) and runs 540 s."""
+        clock = Clock()
+        state = {"start": None}
+        lasts = 540
+
+        def sibling_running():
+            return state["start"] is not None and clock.seconds < state["start"] + lasts
+
         def jobs(seconds):
             found = nightly_run(helper_done_at=0)(seconds)
-            if 60 <= seconds < 600:
+            if sibling_running():
                 found.append(job("publish-nightly", labels=["blacksmith-2vcpu-ubuntu-2404"], status="in_progress",
                                  runner="linux"))
             return found
-        clock = Clock()
-        api = NightlyAPI(clock, jobs)
+        stalled = blacksmith_snapshot(queued=40, running=0, oldest=30)
+        free = blacksmith_snapshot()
+
+        class API(NightlyAPI):
+            def newer_unfinished_runs(self, path, run_id, branch):
+                if state["start"] is None and not retry:
+                    state["start"] = clock.seconds
+                return super().newer_unfinished_runs(path, run_id, branch)
+
+            def cancel(self, run_id, before_retry=None):
+                if retry and state["start"] is None:
+                    # The first cancel is refused for a rate limit; the sibling starts during the wait.
+                    state["start"] = clock.seconds
+                    before_retry()
+                super().cancel(run_id, before_retry)
+        api = API(clock, jobs, workflow="runs-on: blacksmith-6vcpu-macos-26\n",
+                  snapshot=lambda seconds: (stalled if stalled_from_sibling and state["start"] is not None
+                                            else free)(seconds))
         target = rescue.Target(RUN_ID, 1, HEAD, 0, side=True, nightly=True, path=rescue.NIGHTLY_WORKFLOW_PATH)
-        lines = []
+        return clock, api, target, state, lasts
+
+    def test_the_watch_resumes_and_moves_the_build_once_the_late_sibling_ends(self):
+        for retry in (False, True):
+            clock, api, target, state, lasts = self.late_sibling_api(retry=retry)
+            lines = []
+            result = rescue.follow(api, target, seconds=30, queue_rounds="0", now=clock.now, sleep=clock.sleep,
+                                   log=lines.append)
+            self.assertTrue(any(line.startswith(rescue.NIGHTLY_BUSY) for line in lines), (retry, lines))
+            self.assertEqual(result, "done", retry)
+            # The retried cancel (retry) never went out: the only cancel sent is the one after the sibling ended.
+            self.assertEqual(api.calls.count("cancel"), 1, retry)
+            self.assertGreaterEqual(api.first_cancel, state["start"] + lasts)
+            self.assertEqual(api.calls[-1], "rerun-failed", retry)
+
+    def test_a_resumed_watch_still_holds_off_a_stalled_label(self):
+        clock, api, target, state, lasts = self.late_sibling_api(stalled_from_sibling=True)
         result = rescue.follow(api, target, seconds=30, queue_rounds="0", now=clock.now, sleep=clock.sleep,
-                               log=lines.append)
-        self.assertEqual(result, "done")
-        self.assertIn("cancel", api.calls)
-        self.assertGreaterEqual(api.first_cancel, 600)
-        self.assertEqual(api.calls[-1], "rerun-failed")
+                               log=lambda _: None)
+        self.assertNotIn("rerun-failed", api.calls)
+        self.assertIn("kept on the owned pool", result)
+
+    def test_a_sibling_in_its_runner_setup_is_started_work(self):
+        setup = {**job("publish-nightly", status="in_progress", runner="linux"),
+                 "steps": [{"name": "Set up job", "status": "in_progress"}]}
+        jobs = nightly_run(helper_done_at=0)(30 * 60) + [setup]
+        look = rescue.assess(jobs, now=START + dt.timedelta(seconds=30 * 60), budget_seconds=30, reserved=True)
+        self.assertEqual(look.action, "watch")
+        api = NightlyAPI(Clock(), lambda seconds: jobs)
+        target = rescue.Target(RUN_ID, 1, HEAD, 0, side=True, nightly=True, path=rescue.NIGHTLY_WORKFLOW_PATH)
+        self.assertEqual(rescue.started_nightly_work(api, target, lambda _: None, lambda _: None), "publish-nightly")
+        # A nightly build held in its own runner's setup is started too: never cancelled, even at the end.
+        held = nightly_run(started_at=20, setup_until=10 ** 9, helper_done_at=0)(30 * 60)
+        for closing in (False, True):
+            deadline = START + dt.timedelta(seconds=30 * 60 + (30 if closing else 3600))
+            self.assertEqual(rescue.assess(held, now=START + dt.timedelta(seconds=30 * 60), budget_seconds=30,
+                                           deadline=deadline, reserved=True).action, "watch")
 
     def test_a_retried_cancel_of_a_nightly_reads_its_jobs_again(self):
         class Limited(rescue.GitHub):
@@ -2592,7 +2646,7 @@ class Nightly(unittest.TestCase):
                 return [job("publish-nightly", status="in_progress", runner="linux")]
         api = Limited()
         target = rescue.Target(RUN_ID, 1, HEAD, 0, side=True, nightly=True, path=rescue.NIGHTLY_WORKFLOW_PATH)
-        with self.assertRaises(rescue.Aborted):
+        with self.assertRaises(rescue.NightlyBusy):
             rescue.nightly_cancel(api, target, lambda _: None, lambda _: None)
 
     def test_a_linux_sibling_blocks_the_look_too(self):

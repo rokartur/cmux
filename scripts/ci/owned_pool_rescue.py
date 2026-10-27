@@ -1000,9 +1000,9 @@ def assess(jobs: Sequence[Mapping[str, Any]], *, now: dt.datetime, budget_second
     # through attempt 2; the bot's next rerun is the overflow.
     on_mini = [job for job in jobs if job_pool(job) and job.get("status") == "in_progress" and not in_setup(job)]
     if reserved:
-        # A started nightly is never cancelled for a slow runner: any job of it running anywhere (a Blacksmith
-        # helper build, a Linux sibling) blocks the cancel, not only an owned one.
-        on_mini = [job for job in jobs if job.get("status") == "in_progress" and not in_setup(job)]
+        # A started nightly is never cancelled for a slow runner: any job of it a runner has taken, anywhere
+        # (a Blacksmith helper build, a Linux sibling, one still in its runner's setup), blocks the cancel.
+        on_mini = [job for job in jobs if job.get("status") == "in_progress"]
     # A job that failed on its own (not refused by the fleet) has already made the run red. Cancelling
     # and re-running it repeats that failure and puts the stuck job at the back of the same queue
     # (feat-cmux-next, 2026-10-20: 33 of 44 cmux-next pull request runs reached attempt 2 or 3, each
@@ -1020,6 +1020,9 @@ def assess(jobs: Sequence[Mapping[str, Any]], *, now: dt.datetime, budget_second
     # shards that way to a refusal), so a job held in setup waits for them, as a
     # refusal does, until the watch is about to end.
     running = [job for job in jobs if job.get("status") == "in_progress" and not in_setup(job)]
+    if reserved:
+        # A nightly job held in setup has started too (and so has any sibling in its setup): never cancelled.
+        running = [job for job in jobs if job.get("status") == "in_progress"]
     closing = deadline is not None and now >= deadline - dt.timedelta(seconds=END_MARGIN_SECONDS)
     # A nightly's running sibling is never cancelled, not even as the watch ends.
     if held and not decided and (not running or closing and not reserved):
@@ -2218,6 +2221,10 @@ def pull_moved(api: GitHub, target: Target, sleep: Callable[[float], None],
 NIGHTLY_BUSY = "not rescued: started nightly work is running"
 
 
+class NightlyBusy(Aborted):
+    """A nightly's job started during a rate-limit wait before a retried cancel (nightly_cancel())."""
+
+
 def nightly_cancel(api: GitHub, target: Target, sleep: Callable[[float], None], log: Callable[[str], None]) -> None:
     """api.cancel, which for a nightly reads the jobs again before a cancel retried after a rate-limit wait."""
     if not target.nightly:
@@ -2227,11 +2234,8 @@ def nightly_cancel(api: GitHub, target: Target, sleep: Callable[[float], None], 
     def check() -> None:
         busy = started_nightly_work(api, target, sleep, log)
         if busy:
-            raise Aborted(f"{busy} of nightly run {target.run_id} started during a rate-limit wait; not cancelled")
-    try:
-        api.cancel(target.run_id, before_retry=check)
-    except TypeError:
-        api.cancel(target.run_id)  # a client without the retry hook (the tests' fakes)
+            raise NightlyBusy(busy)
+    api.cancel(target.run_id, before_retry=check)
 
 
 def started_nightly_work(api: GitHub, target: Target, sleep: Callable[[float], None],
@@ -2243,8 +2247,7 @@ def started_nightly_work(api: GitHub, target: Target, sleep: Callable[[float], N
     if not target.nightly:
         return ""
     jobs = read(lambda: api.jobs(target.run_id, target.attempt), sleep, log)
-    running = sorted(str(job.get("name") or job.get("id")) for job in jobs
-                     if job.get("status") == "in_progress" and not in_setup(job))
+    running = sorted(str(job.get("name") or job.get("id")) for job in jobs if job.get("status") == "in_progress")
     return ", ".join(running)
 
 
@@ -2287,7 +2290,10 @@ def rescue(api: GitHub, target: Target, *, now: Callable[[], dt.datetime], sleep
         busy = started_nightly_work(api, target, sleep, log)
         if busy:
             return f"{NIGHTLY_BUSY} ({busy}); {moved}, but a started nightly is never cancelled"
-        nightly_cancel(api, target, sleep, log)
+        try:
+            nightly_cancel(api, target, sleep, log)
+        except NightlyBusy as busy_now:
+            return f"{NIGHTLY_BUSY} ({busy_now}); {moved}, but a started nightly is never cancelled"
         return f"cancelled run {target.run_id}, not re-run: {moved}"
     if moved:
         return f"not rescued: {moved}"
@@ -2326,7 +2332,10 @@ def rescue(api: GitHub, target: Target, *, now: Callable[[], dt.datetime], sleep
     busy = started_nightly_work(api, target, sleep, log)
     if busy:
         return f"{NIGHTLY_BUSY} ({busy}); a started nightly is never cancelled"
-    nightly_cancel(api, target, sleep, log)
+    try:
+        nightly_cancel(api, target, sleep, log)
+    except NightlyBusy as busy_now:
+        return f"{NIGHTLY_BUSY} ({busy_now}); it started during a rate-limit wait, and a started nightly is never cancelled"
     log(f"cancelled run {target.run_id}")
     started = now()
     # Time spent waiting through rate limits (GitHub.request) is not the run's settling time:
@@ -2577,8 +2586,12 @@ def follow(client: GitHub, target: Target, *, seconds: int, queue_rounds: str | 
                 return "stopped: watch limit reached with a started nightly still running"
             outcome, reason = watch(client, target, budget_seconds=first_budget, now=clock, sleep=sleep, log=log,
                                     deadline=deadline, floor_seconds=effective_seconds, seen=seen)
+            if outcome == "rescue":
+                outcome, reason, held = hold_for_destination(
+                    client, target, outcome, reason, budget_seconds=first_budget, floor_seconds=effective_seconds,
+                    deadline=deadline, now=clock, sleep=sleep, log=log, seen=seen)
             if outcome not in ("rescue", "refused"):
-                return f"stopped: {reason}"
+                return f"stopped: {reason}" + (f"; kept on the owned pool: {held}" if held else "")
             log(f"{'rescue' if outcome == 'rescue' else 'refused'}: {reason}")
             continue
         # Only an E2E full re-run picks a new runner in this watch. Other CI
