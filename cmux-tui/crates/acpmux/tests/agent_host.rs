@@ -654,6 +654,7 @@ async fn a_harness_exit_does_not_settle_a_line_its_host_still_writes() {
     // Its harness exited and its host said so; its host still writes the line.
     tokio::time::sleep(Duration::from_secs(2)).await;
     let settled = fence.is_settled();
+    eprintln!("DIAG fence={fence:?} pidfile={:?} host_alive={}", std::fs::read_to_string(&pid_file).ok(), unsafe { libc::kill(record.host_pid as i32, 0) } == 0);
     // SAFETY: the host this test spawned; its live lock is held, so the pid is its own.
     unsafe { libc::kill(record.host_pid as i32, libc::SIGKILL) };
     if let Some(pid) = std::fs::read_to_string(&pid_file).ok().and_then(|p| p.parse().ok()) {
