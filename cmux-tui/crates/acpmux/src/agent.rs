@@ -165,7 +165,7 @@ pub const FENCE_CUT: &str =
     "an MDM push turned full access off before this message reached the agent, so it was not sent";
 
 /// One message's way to its agent: queued, being written, written (its agent's own stdin has
-/// it: for a hosted agent, once its request is answered, as its host says nothing sooner), cut
+/// it: for a hosted agent, once its host wrote it to the harness, `WRITTEN_METHOD`), cut
 /// while queued (never written after), or failed (its transport closed). A family message or
 /// answer is held to it (`hub/full_access_bound.rs` `hold_until_written`).
 #[derive(Clone)]
@@ -1225,11 +1225,12 @@ impl ChildAgent {
             unhanded.0 = None;
             on_written();
             let answer = rx.await;
-            // A hosted agent answered it, so it read it: written (a host of protocol 1 gives no
-            // receipt, review 83 of #23322). This side's own "closed" is no answer (review 87).
-            // A direct agent's own writer says when it is written: an answer the Codex bridge
-            // makes up once its app-server exits proves nothing (review 87).
-            if self.hosted.is_some()
+            // An agent on a protocol-1 host answered it, so it read it: written (its host gives
+            // no receipt, review 83 of #23322). This side's own "closed" is no answer (review
+            // 87). A direct agent's own writer, and a later host's receipt, say when it is
+            // written: an answer the Codex bridge makes up once its app-server exits proves
+            // nothing (review 87).
+            if self.hosted.as_ref().is_some_and(|h| !h.link().receipted)
                 && let Ok(r) = &answer
                 && r.as_ref().err().is_none_or(|e| e.message != AGENT_CLOSED)
                 && let Some(f) = fence
