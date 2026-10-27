@@ -639,8 +639,12 @@ async fn a_harness_exit_does_not_settle_a_line_its_host_still_writes() {
         pid_file.display()
     );
     let kept = dir.join("agent");
-    let script =
-        format!("#!/bin/sh\nexec 3<&0\npython3 -c \"{hold}\" <&3 3<&- >/dev/null 2>&1 &\nexit 0\n");
+    // The harness exits only once its descendant left its group, so the host's end of the
+    // harness's group does not take it.
+    let script = format!(
+        "#!/bin/sh\nexec 3<&0\npython3 -c \"{hold}\" <&3 3<&- >/dev/null 2>&1 &\nuntil [ -s '{}' ]; do sleep 0.05; done\nexit 0\n",
+        pid_file.display()
+    );
     write_executable(&kept, &script);
     let mut launch = spec(&dir, "s-fenced-kept");
     launch.program = kept.to_string_lossy().into_owned();
@@ -654,7 +658,11 @@ async fn a_harness_exit_does_not_settle_a_line_its_host_still_writes() {
     // Its harness exited and its host said so; its host still writes the line.
     tokio::time::sleep(Duration::from_secs(2)).await;
     let settled = fence.is_settled();
-    eprintln!("DIAG fence={fence:?} pidfile={:?} host_alive={}", std::fs::read_to_string(&pid_file).ok(), unsafe { libc::kill(record.host_pid as i32, 0) } == 0);
+    eprintln!(
+        "DIAG fence={fence:?} pidfile={:?} host_alive={}",
+        std::fs::read_to_string(&pid_file).ok(),
+        unsafe { libc::kill(record.host_pid as i32, 0) } == 0
+    );
     // SAFETY: the host this test spawned; its live lock is held, so the pid is its own.
     unsafe { libc::kill(record.host_pid as i32, libc::SIGKILL) };
     if let Some(pid) = std::fs::read_to_string(&pid_file).ok().and_then(|p| p.parse().ok()) {
