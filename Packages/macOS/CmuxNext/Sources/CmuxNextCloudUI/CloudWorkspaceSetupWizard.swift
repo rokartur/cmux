@@ -87,6 +87,8 @@ public struct CloudWorkspaceSetupWizard {
             identifier: "cmux.dialog.cloud.workspaceSetup")
     }
 
+    public static let credentialDialogIdentifier = "cmux.dialog.cloud.workspaceCredentials"
+
     public enum Provider: Sendable, Equatable { case claude, codex }
 
     public func offerCredentialSetup(machine: String, account: String,
@@ -110,7 +112,7 @@ public struct CloudWorkspaceSetupWizard {
                 CmuxDialogButton(id: "skip", title: CloudWorkspaceSetupWizardStrings.skip, role: .default),
                 CmuxDialogButton(id: "transfer", title: CloudWorkspaceSetupWizardStrings.transferAndFinish, role: .normal),
             ],
-            identifier: "cmux.dialog.cloud.workspaceCredentials")
+            identifier: credentialDialogIdentifier)
     }
 
 }
