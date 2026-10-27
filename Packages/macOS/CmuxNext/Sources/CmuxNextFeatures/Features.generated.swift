@@ -1226,6 +1226,23 @@ nonisolated extension Feature {
         runtimeMutable: false
     )
 
+    /// Long-lived SQLite connections of the daemon and the app's page visit logs give their unused page cache back at warning and critical memory pressure, each on the connection's own executor; the pages read again on the next query.
+    public static let memorySqliteTrim = Feature(
+        index: 69,
+        name: "memorySqliteTrim",
+        owner: "PL-memory",
+        description: "Long-lived SQLite connections of the daemon and the app's page visit logs give their unused page cache back at warning and critical memory pressure, each on the connection's own executor; the pages read again on the next query.",
+        kind: .perfPath,
+        process: .both,
+        chromiumFeature: nil,
+        defaults: FeatureDefaults(dev: false, nightly: false, release: false),
+        expires: "2026-12-20",
+        params: [],
+        stories: ["memory-hidden"],
+        sticky: false,
+        runtimeMutable: false
+    )
+
     /// Tab strip icon caches join the memory coordinator: drawn symbols, pack icons, agent marks and emoji shrink as the memory limit falls; at critical pressure only icons drawn in the last 2 seconds stay. A dropped icon is drawn again when next shown.
     public static let memoryTabCaches = Feature(
         index: 70,
@@ -2130,6 +2147,7 @@ nonisolated extension Feature {
         .memorySaverSetting,
         .memoryScrollbackPressure,
         .memorySmallAppStores,
+        .memorySqliteTrim,
         .memoryTabCaches,
         .memoryTerminalLastFrames,
         .memoryUrgentDiscardRanking,
@@ -2252,6 +2270,7 @@ nonisolated extension Feature {
         .memorySaverSetting,
         .memoryScrollbackPressure,
         .memorySmallAppStores,
+        .memorySqliteTrim,
         .memoryTabCaches,
         .memoryTerminalLastFrames,
         .memoryUrgentDiscardRanking,
