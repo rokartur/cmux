@@ -6,19 +6,26 @@ import Foundation
 /// creation flow still owns provisioning and opening the first workspace.
 @MainActor
 public struct CloudWorkspaceSetupWizard {
+    /// Creates a wizard whose presentation and side effects are supplied by the app.
     public init() {}
 
+    /// The starting contents of a new machine.
     public nonisolated enum Source: String, Sendable, Equatable {
         case empty
         case repository
     }
 
+    /// Validated creation input, without any machine or credential side effects.
     public nonisolated struct Plan: Sendable, Equatable {
+        /// The chosen starting point.
         public var source: Source
+        /// A repository only when the person chose the repository starting point.
         public var repository: CloudMachineRepo?
 
+        /// The existing machine creation request for this starting point.
         public var request: CloudMachineRequest { CloudMachineRequest(repo: repository) }
 
+        /// Ignores stale repository text for an empty VM and validates it otherwise.
         public static func make(source: Source, repositoryText: String) throws -> Plan {
             switch source {
             case .empty:
@@ -29,11 +36,13 @@ public struct CloudWorkspaceSetupWizard {
         }
     }
 
+    /// Whether the selected account and API route allow personal provider setup.
     public nonisolated enum CredentialAvailability: Equatable, Sendable {
         case available
         case teamMachine
         case unsupportedCloudRoute
 
+        /// Shared team machines never receive personal credentials through this flow.
         public static func resolve(teamID: String?, supportsFileRoute: Bool) -> CredentialAvailability {
             guard teamID == nil else { return .teamMachine }
             return supportsFileRoute ? .available : .unsupportedCloudRoute
@@ -45,6 +54,7 @@ public struct CloudWorkspaceSetupWizard {
         static let repository = "repository"
     }
 
+    /// Presents the starting-point choice; dismissal has no side effects.
     public func choosePlan(availability: CredentialAvailability,
                            present: (CmuxDialogSpec) async -> CmuxDialogAnswer) async throws -> Plan? {
         let answer = await present(Self.setupDialogSpec(availability: availability))
@@ -66,6 +76,7 @@ public struct CloudWorkspaceSetupWizard {
         }
     }
 
+    /// The production setup dialog, also used by the native gallery.
     public static func setupDialogSpec(availability: CredentialAvailability = .available,
                                 source: Source = .empty, repository: String = "") -> CmuxDialogSpec {
         CmuxDialogSpec(
@@ -87,10 +98,13 @@ public struct CloudWorkspaceSetupWizard {
             identifier: "cmux.dialog.cloud.workspaceSetup")
     }
 
+    /// Identifies consent dialogs that automation must never answer.
     public static let credentialDialogIdentifier = "cmux.dialog.cloud.workspaceCredentials"
 
+    /// Providers whose credentials the person may explicitly transfer.
     public enum Provider: Sendable, Equatable { case claude, codex }
 
+    /// Transfers only the selected providers after an explicit, non-dismissed confirmation.
     public func offerCredentialSetup(machine: String, account: String,
                                      present: (CmuxDialogSpec) async -> CmuxDialogAnswer,
                                      transfer: (Provider) async throws -> Void) async throws {
@@ -100,6 +114,7 @@ public struct CloudWorkspaceSetupWizard {
         if answer.isOn("codex") { try await transfer(.codex) }
     }
 
+    /// Discloses the destination, reusable Claude token and per-VM Codex login.
     public static func credentialDialogSpec(machine: String, account: String) -> CmuxDialogSpec {
         CmuxDialogSpec(
             title: CloudWorkspaceSetupWizardStrings.credentialTitle(machine),
@@ -119,7 +134,7 @@ public struct CloudWorkspaceSetupWizard {
 
 private enum CloudWorkspaceSetupWizardStrings {
     nonisolated static let title = String(localized: "cloud.workspaceSetup.title", defaultValue: "New Cloud Workspace", table: "Cloud", bundle: .module)
-    nonisolated static let setupSummary = String(localized: "cloud.workspaceSetup.summary", defaultValue: "Choose a starting point. A repository is cloned into ~/work on the new VM; no credential is stored in the repository URL.", table: "Cloud", bundle: .module)
+    nonisolated static let setupSummary = String(localized: "cloud.workspaceSetup.summary", defaultValue: "Start a new project on an empty VM, or clone a GitHub repository into ~/work.", table: "Cloud", bundle: .module)
     nonisolated static let sourceLabel = String(localized: "cloud.workspaceSetup.sourceLabel", defaultValue: "Start with", table: "Cloud", bundle: .module)
     nonisolated static let emptyChoice = String(localized: "cloud.workspaceSetup.emptyChoice", defaultValue: "Empty VM — start a new project", table: "Cloud", bundle: .module)
     nonisolated static let repositoryChoice = String(localized: "cloud.workspaceSetup.repositoryChoice", defaultValue: "From repository", table: "Cloud", bundle: .module)
