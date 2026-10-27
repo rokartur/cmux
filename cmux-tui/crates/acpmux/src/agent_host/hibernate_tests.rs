@@ -1,25 +1,9 @@
 use super::*;
 use tokio::io::{AsyncBufReadExt, BufReader};
 
-struct Children(Vec<i32>);
-impl Drop for Children {
-    fn drop(&mut self) {
-        for pid in &self.0 {
-            unsafe {
-                libc::kill(*pid, libc::SIGKILL);
-            }
-        }
-    }
-}
-
 #[tokio::test]
-async fn idle_pid_only_host_owner_fences_activity_and_spares_every_grandchild() {
-    let script = r#"import json, subprocess, signal, sys, time
-signal.signal(signal.SIGTERM, signal.SIG_IGN)
-pids = [subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(600)'], start_new_session=s, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).pid for s in (False, True)]
-print(json.dumps(pids), flush=True)
-time.sleep(600)
-"#;
+async fn idle_pid_only_host_owner_fences_activity_and_kills_a_term_resistant_leader() {
+    let script = "import signal,time; signal.signal(signal.SIGTERM,signal.SIG_IGN); print('ready',flush=True); time.sleep(600)";
     let mut child = tokio::process::Command::new("python3")
         .args(["-c", script])
         .stdin(std::process::Stdio::null())
@@ -37,7 +21,7 @@ time.sleep(600)
     .unwrap()
     .unwrap()
     .unwrap();
-    let children = Children(serde_json::from_str(&line).unwrap());
+    assert_eq!(line, "ready");
     let activity = Arc::new(AtomicU64::new(2));
     let pid_only = Arc::new(AtomicBool::new(false));
     let (tx, rx) = tokio::sync::mpsc::channel(1);
@@ -76,7 +60,4 @@ time.sleep(600)
     );
     assert!(pid_only.load(Ordering::SeqCst));
     assert_ne!(unsafe { libc::kill(leader, 0) }, 0, "held leader was not reaped");
-    for pid in &children.0 {
-        assert_eq!(unsafe { libc::kill(*pid, 0) }, 0, "grandchild was signalled");
-    }
 }

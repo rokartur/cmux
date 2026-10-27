@@ -14,7 +14,12 @@ impl Drop for Children {
 #[tokio::test]
 async fn idle_pid_only_host_query_fences_activity_and_preserves_children() {
     let dir = scratch("idle");
+    let probe = tokio::net::UnixDatagram::bind(dir.join("probe")).unwrap();
     let mut launch = spec(&dir, "idle");
+    launch.env.push((
+        "FAKE_CLAUDE_IDLE_PROBE_SOCKET".into(),
+        dir.join("probe").to_string_lossy().into_owned(),
+    ));
     launch.args = vec![concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fake_claude.py").into()];
     launch.env.push((
         "FAKE_CLAUDE_IDLE_CHILDREN".into(),
@@ -49,7 +54,13 @@ async fn idle_pid_only_host_query_fences_activity_and_preserves_children() {
     read_until(&owner, &mut h, |e| matches!(e, Entry::Exit { .. })).await;
     wait_dead(death).await;
     for pid in &children.0 {
-        assert_eq!(unsafe { libc::kill(*pid, 0) }, 0, "idle killed a grandchild");
+        assert_eq!(unsafe { libc::kill(*pid, libc::SIGUSR1) }, 0);
+        let mut reply = [0; 32];
+        let n = tokio::time::timeout(Duration::from_secs(3), probe.recv(&mut reply))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(std::str::from_utf8(&reply[..n]).unwrap(), pid.to_string());
     }
     drop(children);
     let _ = std::fs::remove_dir_all(dir);

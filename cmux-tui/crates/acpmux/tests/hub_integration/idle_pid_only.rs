@@ -37,9 +37,11 @@ async fn idle_pid_only_preserves_same_group_and_escaped_children_then_wakes() {
     let root = std::env::temp_dir().join(format!("idle-owned-{}", uuid::Uuid::now_v7()));
     std::fs::create_dir_all(&root).unwrap();
     let children = Children(root.join("children"));
+    let probe = tokio::net::UnixDatagram::bind(root.join("probe")).unwrap();
     let (hub, mut c) = stop::claude_setup_env(BTreeMap::from([
         ("FAKE_CLAUDE_IDLE_CHILDREN".into(), children.0.to_string_lossy().into_owned()),
         ("FAKE_CLAUDE_STORE".into(), root.to_string_lossy().into_owned()),
+        ("FAKE_CLAUDE_IDLE_PROBE_SOCKET".into(), root.join("probe").to_string_lossy().into_owned()),
     ]))
     .await;
     let clock = acpmux::clock::ManualClock::new();
@@ -65,7 +67,13 @@ async fn idle_pid_only_preserves_same_group_and_escaped_children_then_wakes() {
     // Cover the existing reader's 500ms leader check too, not only the TERM path.
     tokio::time::sleep(Duration::from_millis(700)).await;
     for pid in pids {
-        assert_eq!(unsafe { libc::kill(pid, 0) }, 0, "idle killed owned background child {pid}");
+        assert_eq!(unsafe { libc::kill(pid, libc::SIGUSR1) }, 0);
+        let mut reply = [0; 32];
+        let n = tokio::time::timeout(Duration::from_secs(3), probe.recv(&mut reply))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(std::str::from_utf8(&reply[..n]).unwrap(), pid.to_string());
     }
     c.request(
         method::SESSION_PROMPT,

@@ -504,9 +504,13 @@ while True:
             time.sleep(int(os.environ["FAKE_CLAUDE_MODE_DELAY_MS"]) / 1000)
         if request.get("subtype") == "initialize" and os.environ.get("FAKE_CLAUDE_IDLE_CHILDREN"):
             import subprocess
-            children = [subprocess.Popen([sys.executable, "-c", "import time; time.sleep(600)"],
-                        start_new_session=escape, stdin=subprocess.DEVNULL,
-                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).pid for escape in (False, True)]
+            code = "import signal,socket,os,time; signal.signal(signal.SIGUSR1, lambda *_: socket.socket(socket.AF_UNIX,socket.SOCK_DGRAM).sendto(str(os.getpid()).encode(), os.environ['FAKE_CLAUDE_IDLE_PROBE_SOCKET'])); print('ready',flush=True); time.sleep(600)"
+            children = []
+            for escape in (False, True):
+                child = subprocess.Popen([sys.executable, "-c", code], start_new_session=escape,
+                    stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+                child.stdout.readline()
+                children.append(child.pid)
             with open(os.environ["FAKE_CLAUDE_IDLE_CHILDREN"], "a") as f:
                 f.write(json.dumps(children) + "\n")
         answer = {}
