@@ -13,7 +13,7 @@ import CmuxNextSettings
 /// same center path a click takes.
 /// - `{}` lists the open dialogs (id, title, lines, origin, scope, visible,
 ///   buttons, field values, frame in window coordinates).
-/// - `{open: "confirm" | "text" | "credentials" | "save" | "choice" | "sessionMove" | "sessionMoveEnd" | "cloudWorkspace" | "cloudCredentials",
+/// - `{open: "confirm" | "text" | "credentials" | "save" | "choice" | "sessionMove" | "sessionMoveEnd" | "cloudWorkspaceEmpty" | "cloudWorkspaceRepository" | "cloudWorkspaceTeam" | "cloudCredentials",
 ///   scope: "window" | "app", origin?}`
 ///   shows a fixture (screenshots, latency) and returns its id.
 /// - `{id?, set: {field: string | bool}}`, `{id?, key: "return" | "escape" | "tab" | "shift-tab" | "cmd-<c>"}`,
@@ -136,7 +136,10 @@ enum DebugDialog {
                 .check(id: "remember", title: "Don't ask again", on: false),
             ], buttons: [.cancel(), CmuxDialogButton(id: "select", title: "Select", role: .default)],
             identifier: "cmux.dialog.fixture.choice"),
-            "cloudWorkspace": CloudWorkspaceSetupWizard.setupDialogSpec(source: .repository, repository: "octo/paint"),
+            // Gallery variants keep the setup surface reviewable without provisioning a VM.
+            "cloudWorkspaceEmpty": CloudWorkspaceSetupWizard.setupDialogSpec(source: .empty),
+            "cloudWorkspaceRepository": CloudWorkspaceSetupWizard.setupDialogSpec(source: .repository, repository: "octo/paint"),
+            "cloudWorkspaceTeam": CloudWorkspaceSetupWizard.setupDialogSpec(availability: .teamMachine, source: .empty),
             "cloudCredentials": CloudWorkspaceSetupWizard.credentialDialogSpec(machine: "paint", account: "Personal account"),
             // Move Sessions from Another cmux Build (session.moveFromBuild), with no other build running.
             "sessionMove": SessionMoveSelection(peers: [moveFixturePeer]).dialog,
