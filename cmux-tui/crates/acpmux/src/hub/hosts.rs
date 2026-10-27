@@ -846,6 +846,11 @@ impl Hub {
             });
             return;
         }
+        // The epoch and turn it is asked under, read under the lock a Stop takes: an answer to
+        // it that is cut is asked again only while they hold (review 88 of #23322).
+        let asked = asked.unwrap_or_else(|| {
+            (session.permission_epoch.load(Ordering::SeqCst), session.turn().map(|t| t.turn_id))
+        });
         state.pending.insert(
             permission_id.clone(),
             PendingPermission {
@@ -899,8 +904,7 @@ impl Hub {
             }
             // An ancestor's answer: written under its fence (`subsession_answer.rs`).
             let fence = hub.answer_fences.lock().unwrap().remove(&permission_id);
-            let asked =
-                Some((s.permission_epoch.load(Ordering::SeqCst), s.turn().map(|t| t.turn_id)));
+            let asked = Some(asked);
             let answer = Ok(permission_answer(outcome));
             let _ = c.respond_fenced(agent_request_id.clone(), answer, fence.as_ref()).await;
             if let Some(fence) = fence {
