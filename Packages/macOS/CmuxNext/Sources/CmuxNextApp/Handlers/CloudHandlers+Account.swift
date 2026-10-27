@@ -2,6 +2,7 @@ import AppKit
 import CmuxNextActions
 import CmuxNextCloud
 import CmuxNextCloudUI
+import CmuxNextCloudCredentials
 import CmuxNextCompat
 import CmuxNextDesign
 import CmuxNextControl
@@ -81,7 +82,7 @@ extension CloudHandlers {
                 account: cloud.auth.activeTeam.team?.displayName ?? String(localized: "cloud.workspaceSetup.personalAccount", defaultValue: "Personal account", table: "Cloud", bundle: .module), present: present) { provider in
                 let transfer = CloudCredentialTransfer(provider: provider == .claude ? .claude : .codex,
                     machineID: session.machineID, teamID: teamID, userID: userID, openTerminal: { [weak services] line in
-                        services?.inFrontPane { $0.newTerminalTab(typing: line + "\r") } ?? false
+                        await services?.openLocalProviderLogin(line) ?? false
                     })
                 try await transfer.run(api: cloud.api, currentTeamID: { cloud.auth.teamID },
                                        currentUserID: { cloud.auth.user?.id }, confirmed: true)
