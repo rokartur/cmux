@@ -8,12 +8,18 @@ extension AgentPaneTransport {
     /// is the person). Signed only in a chat on another machine, only with the key bound to that
     /// chat's own machine and to the run that asks, and only for the prompt and option the person
     /// picked (`ticketPick`). A peer of this Mac's daemon has no key of this app (the app has no
-    /// exec channel of its own there). Otherwise the allow goes unproved (that daemon refuses
-    /// it), and the pane says so.
+    /// exec channel of its own there): there this Mac's approver key signs a one-time allow
+    /// (``signPeerAllow(_:session:permission:option:context:ticketPick:)``). Otherwise the allow
+    /// goes unproved (that daemon refuses it), and the pane says so.
     func signRelayedAllow(_ box: FrameBox, sessionId: String?, ticketPick: Bool) {
         guard let session = sessionId, let permission = box.param("permissionId"), let option = box.param("optionId"),
               let context = decisions.context(session: session, permission: permission),
               context.instance != decisions.localInstance else { return }
+        // A prompt of a peer of this Mac's daemon (a chat opened with `--host`).
+        if remoteApprovals == nil, !remoteWire {
+            return signPeerAllow(box, session: session, permission: permission, option: option, context: context,
+                                 ticketPick: ticketPick)
+        }
         // No key bound for the chat's machine and the run that asks: approvals are off there.
         guard let machine = remoteApprovals?.machineID,
               let key = AcpmuxRemotePersonKeys.shared.key(machine: machine, instance: context.instance) else {
@@ -41,6 +47,31 @@ extension AgentPaneTransport {
         let proof = key.decisionProof(instance: context.instance, session: session, permission: permission, option: option,
                                       nonce: context.nonce)
         box.setDecision(nonce: context.nonce, proof: proof)
+    }
+
+    /// An allow for a prompt of a peer of this Mac's daemon: this Mac's approver key signs it when
+    /// it is a one-time allow the prompt offers (acpmux `mac_approvers::may_allow`), for the
+    /// prompt and option the person picked, and the peer counts it once if it enrolled this Mac
+    /// (`acpmux host enroll`). It refuses it otherwise, naming itself, and the pane says approvals
+    /// are off there. Anything else (an always-allow, an answer with notes) goes unproved, and the
+    /// pane says the same.
+    private func signPeerAllow(_ box: FrameBox, session: String, permission: String, option: String,
+                               context: AcpmuxDecisionContexts.Context, ticketPick: Bool) {
+        guard ticketPick else {
+            Self.logger.info("agent pane transport peer allow without the person's ticket: sent without a proof")
+            return
+        }
+        guard context.allowOnce.contains(option), Self.param("annotations", box) == nil else {
+            onRemoteApprovalsOff?(nil)
+            return
+        }
+        guard let decision = AcpmuxMacApprover.shared.decision(instance: context.instance, session: session, permission: permission,
+                                                               toolCall: context.toolCall, option: option, nonce: context.nonce,
+                                                               answers: Self.param("answers", box)) else {
+            Self.logger.info("agent pane transport peer allow not signed: sent without a proof")
+            return
+        }
+        box.setDecision(nonce: context.nonce, proof: decision, field: "approverDecision")
     }
 
     /// The frame's `answers` or `annotations` (a question's), when it has any that are not null.

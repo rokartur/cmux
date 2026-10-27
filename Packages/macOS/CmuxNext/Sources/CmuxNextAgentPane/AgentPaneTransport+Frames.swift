@@ -91,14 +91,16 @@ extension AgentPaneTransport {
             frame.withLock { (($0["params"] as? [String: Any])?[key] as? String) }
         }
 
-        /// Adds the person's decision proof (`_meta.acpmux`) of a relayed allow.
-        func setDecision(nonce: String, proof: String) {
+        /// Adds the decision proof (`_meta.acpmux`) of a relayed allow: the person's
+        /// (`personDecision`), or this Mac's signed one-time allow for a peer's prompt
+        /// (`approverDecision`, acpmux `hub/mac_approvers.rs`).
+        func setDecision(nonce: String, proof: some Sendable, field: String = "personDecision") {
             frame.withLock { object in
                 var params = object["params"] as? [String: Any] ?? [:]
                 var meta = params["_meta"] as? [String: Any] ?? [:]
                 var acpmux = meta["acpmux"] as? [String: Any] ?? [:]
                 acpmux["decisionNonce"] = nonce
-                acpmux["personDecision"] = proof
+                acpmux[field] = proof
                 meta["acpmux"] = acpmux
                 params["_meta"] = meta
                 object["params"] = params
