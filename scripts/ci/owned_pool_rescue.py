@@ -999,6 +999,10 @@ def assess(jobs: Sequence[Mapping[str, Any]], *, now: dt.datetime, budget_second
     # when another side job is still running. Manual reruns stay minis-first
     # through attempt 2; the bot's next rerun is the overflow.
     on_mini = [job for job in jobs if job_pool(job) and job.get("status") == "in_progress" and not in_setup(job)]
+    if reserved:
+        # A started nightly is never cancelled for a slow runner: any job of it running anywhere (a Blacksmith
+        # helper build, a Linux sibling) blocks the cancel, not only an owned one.
+        on_mini = [job for job in jobs if job.get("status") == "in_progress" and not in_setup(job)]
     # A job that failed on its own (not refused by the fleet) has already made the run red. Cancelling
     # and re-running it repeats that failure and puts the stuck job at the back of the same queue
     # (feat-cmux-next, 2026-10-20: 33 of 44 cmux-next pull request runs reached attempt 2 or 3, each
@@ -1017,7 +1021,8 @@ def assess(jobs: Sequence[Mapping[str, Any]], *, now: dt.datetime, budget_second
     # refusal does, until the watch is about to end.
     running = [job for job in jobs if job.get("status") == "in_progress" and not in_setup(job)]
     closing = deadline is not None and now >= deadline - dt.timedelta(seconds=END_MARGIN_SECONDS)
-    if held and not decided and (not running or closing):
+    # A nightly's running sibling is never cancelled, not even as the watch ends.
+    if held and not decided and (not running or closing and not reserved):
         names = ", ".join(sorted(str(job.get("name") or job.get("id")) for job in held))
         return Look("rescue", f"{names} waited in {job_pool(held[0])}'s runner setup for capacity for at least "
                               f"{SETUP_WAIT_SECONDS}s")
@@ -1039,7 +1044,9 @@ def assess(jobs: Sequence[Mapping[str, Any]], *, now: dt.datetime, budget_second
         return Look("watch", f"{held_for} waiting for the runner reserved for it; never moved", waiting=True)
     if stuck:
         return Look("watch", f"{names} queued on {job_pool(stuck[0])} with no runner, but "
-                             f"{len(on_mini)} job(s) of the run are running on a persistent runner", waiting=True)
+                             f"{len(on_mini)} job(s) of the run are running"
+                             + (" (a started nightly is never cancelled)" if reserved else " on a persistent runner"),
+                    waiting=True)
     if waiting or settling:
         return Look("watch", f"{len(waiting)} job(s) waiting for a persistent runner, {len(settling)} in its setup",
                     waiting=True)
@@ -1884,6 +1891,14 @@ def watch(api: GitHub, target: Target, *, budget_seconds: int,
                     wait = min(api.pace(wait), max(1.0, (deadline - now()).total_seconds() + 1))
                 sleep(wait)
                 continue
+            if look.action == "refused" and not finished and target.nightly and any(
+                    job.get("status") == "in_progress" for job in jobs):
+                # At the watch's end a refusal in a nightly whose other jobs still run is left as it is:
+                # cancelling it to re-run would kill started nightly work. The nightly-next tick re-runs a
+                # failed tip, and the next nightly builds main.
+                log(f"::warning::look {looks}: {look.reason}; the nightly still runs other jobs at the watch "
+                    "limit, so it is not cancelled")
+                return "stop", "watch limit reached with a started nightly still running"
             log(f"look {looks}: {look.reason}")
             if look.action in ("rescue", "refused"):
                 return look.action, look.reason
