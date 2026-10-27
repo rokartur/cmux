@@ -149,7 +149,7 @@ private enum CloudWorkspaceSetupWizardStrings {
     }
 
     nonisolated static func credentialDisclosure(_ machine: String, _ team: String) -> String {
-        String(format: String(localized: "cloud.workspaceSetup.credentialDisclosure", defaultValue: "Claude reuses its saved setup token. Codex starts a fresh login for this VM in a visible terminal on this Mac. The selected credential is installed on %@ for %@, replacing that provider's login for future launches. Existing sessions stay unchanged. Select one or both providers, then confirm the transfer.", table: "Cloud", bundle: .module), machine, team)
+        String(format: String(localized: "cloud.workspaceSetup.credentialDisclosure", defaultValue: "Claude runs claude setup-token on this Mac when needed and saves the long-lived token for later VMs. Codex requires a separate device login for each VM, shown in cmux on this Mac. The selected credential is installed on %@ for %@, replacing that provider's login for future launches. Existing sessions stay unchanged. Select one or both providers, then confirm the transfer.", table: "Cloud", bundle: .module), machine, team)
     }
 
 }
