@@ -64,24 +64,7 @@ struct CloudWorkspaceSetupWizard {
         let cloud = context.services.cloud
         let supportsFileRoute = cloud.configuration.linkSource == .legacy
         let availability = CredentialAvailability.resolve(teamID: cloud.auth.teamID, supportsFileRoute: supportsFileRoute)
-        let lines = [CloudWorkspaceSetupWizardStrings.setupSummary, CloudWorkspaceSetupWizardStrings.credentialsNote(availability)]
-        let spec = CmuxDialogSpec(
-            title: CloudWorkspaceSetupWizardStrings.title,
-            lines: lines,
-            fields: [
-                .choice(id: Field.source, label: CloudWorkspaceSetupWizardStrings.sourceLabel,
-                        options: [
-                            CmuxDialogOption(label: CloudWorkspaceSetupWizardStrings.emptyChoice, value: Source.empty.rawValue),
-                            CmuxDialogOption(label: CloudWorkspaceSetupWizardStrings.repositoryChoice, value: Source.repository.rawValue),
-                        ], selected: Source.empty.rawValue),
-                .text(Field.repository, initial: "", label: CloudWorkspaceSetupWizardStrings.repositoryLabel,
-                      placeholder: CloudWorkspaceSetupWizardStrings.repositoryPlaceholder),
-            ],
-            buttons: [
-                .cancel(CloudWorkspaceSetupWizardStrings.cancel),
-                CmuxDialogButton(id: "create", title: CloudWorkspaceSetupWizardStrings.create, role: .default),
-            ],
-            identifier: "cmux.dialog.cloud.workspaceSetup")
+        let spec = Self.setupDialogSpec(availability: availability)
         let answer = await CmuxDialogCenter.shared.present(spec, in: scope(context))
         guard answer.button == "create", !answer.isDismissal,
               let choice = answer.text(Field.source),
@@ -104,6 +87,27 @@ struct CloudWorkspaceSetupWizard {
         }
     }
 
+    nonisolated static func setupDialogSpec(availability: CredentialAvailability = .available,
+                                source: Source = .empty, repository: String = "") -> CmuxDialogSpec {
+        CmuxDialogSpec(
+            title: CloudWorkspaceSetupWizardStrings.title,
+            lines: [CloudWorkspaceSetupWizardStrings.setupSummary, CloudWorkspaceSetupWizardStrings.credentialsNote(availability)],
+            fields: [
+                .choice(id: Field.source, label: CloudWorkspaceSetupWizardStrings.sourceLabel,
+                        options: [
+                            CmuxDialogOption(label: CloudWorkspaceSetupWizardStrings.emptyChoice, value: Source.empty.rawValue),
+                            CmuxDialogOption(label: CloudWorkspaceSetupWizardStrings.repositoryChoice, value: Source.repository.rawValue),
+                        ], selected: source.rawValue),
+                .text(Field.repository, initial: repository, label: CloudWorkspaceSetupWizardStrings.repositoryLabel,
+                      placeholder: CloudWorkspaceSetupWizardStrings.repositoryPlaceholder),
+            ],
+            buttons: [
+                .cancel(CloudWorkspaceSetupWizardStrings.cancel),
+                CmuxDialogButton(id: "create", title: CloudWorkspaceSetupWizardStrings.create, role: .default),
+            ],
+            identifier: "cmux.dialog.cloud.workspaceSetup")
+    }
+
     private static func offerCredentialSetup(for session: CloudMachineSession, context: AppActionContext) async {
         let services = context.services
         let cloud = context.services.cloud
@@ -114,18 +118,8 @@ struct CloudWorkspaceSetupWizard {
             supportsFileRoute: cloud.configuration.linkSource == .legacy)
         guard availability == .available, let userID else { return }
 
-        let spec = CmuxDialogSpec(
-            title: CloudWorkspaceSetupWizardStrings.credentialTitle(session.machine.title),
-            lines: [CloudWorkspaceSetupWizardStrings.credentialDisclosure(session.machine.title, cloud.auth.activeTeam.team?.displayName ?? CloudWorkspaceSetupWizardStrings.personalAccount)],
-            fields: [
-                .check(id: "claude", title: CloudWorkspaceSetupWizardStrings.setupClaude, on: false),
-                .check(id: "codex", title: CloudWorkspaceSetupWizardStrings.setupCodex, on: false),
-            ],
-            buttons: [
-                CmuxDialogButton(id: "skip", title: CloudWorkspaceSetupWizardStrings.skip, role: .default),
-                CmuxDialogButton(id: "transfer", title: CloudWorkspaceSetupWizardStrings.transferAndFinish, role: .normal),
-            ],
-            identifier: "cmux.dialog.cloud.workspaceCredentials")
+        let spec = Self.credentialDialogSpec(machine: session.machine.title,
+                                             account: cloud.auth.activeTeam.team?.displayName ?? CloudWorkspaceSetupWizardStrings.personalAccount)
         let answer = await CmuxDialogCenter.shared.present(spec, in: scope(context))
         guard answer.button == "transfer", !answer.isDismissal else { return }
 
@@ -151,6 +145,21 @@ struct CloudWorkspaceSetupWizard {
         } catch {
             CloudPresenter.show(CloudWorkspaceSetupWizardStrings.credentialFailedTitle, CloudWorkspaceSetupWizardStrings.credentialFailed, in: context.services.windows.active?.window)
         }
+    }
+
+    nonisolated static func credentialDialogSpec(machine: String, account: String) -> CmuxDialogSpec {
+        CmuxDialogSpec(
+            title: CloudWorkspaceSetupWizardStrings.credentialTitle(machine),
+            lines: [CloudWorkspaceSetupWizardStrings.credentialDisclosure(machine, account)],
+            fields: [
+                .check(id: "claude", title: CloudWorkspaceSetupWizardStrings.setupClaude, on: false),
+                .check(id: "codex", title: CloudWorkspaceSetupWizardStrings.setupCodex, on: false),
+            ],
+            buttons: [
+                CmuxDialogButton(id: "skip", title: CloudWorkspaceSetupWizardStrings.skip, role: .default),
+                CmuxDialogButton(id: "transfer", title: CloudWorkspaceSetupWizardStrings.transferAndFinish, role: .normal),
+            ],
+            identifier: "cmux.dialog.cloud.workspaceCredentials")
     }
 
     private static func waitUntilReady(_ creation: CloudMachineCreation) async -> Bool {
