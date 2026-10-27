@@ -91,6 +91,7 @@ fn update(exec: &Exec, state: &str, extra: Value) -> Out {
 }
 
 impl Background {
+    #[cfg(unix)]
     pub(super) fn has_work(&self) -> bool {
         !self.open.is_empty() || !self.running.is_empty() || !self.asked.is_empty()
     }

@@ -536,6 +536,7 @@ enum Setting {
 
 impl Translator {
     /// Reported background work, including shells whose initial tool call already ended.
+    #[cfg(unix)]
     pub(crate) async fn has_background_work(&self) -> bool {
         !self.background_subagents.lock().await.is_empty()
             || self.background_shells.lock().await.values().any(|shell| shell.background)

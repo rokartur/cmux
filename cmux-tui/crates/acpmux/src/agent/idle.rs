@@ -27,7 +27,10 @@ impl ChildAgent {
     /// True only after the exact held child exited. Lost/old hosts are retained.
     pub(crate) async fn hibernate(&self, generation: u64) -> bool {
         #[cfg(windows)]
-        return false;
+        {
+            let _ = generation;
+            return false;
+        }
         #[cfg(unix)]
         {
             if let Some(hosted) = &self.hosted {
