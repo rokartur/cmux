@@ -104,6 +104,7 @@ struct CloudWorkspaceSetupWizard {
     }
 
     private static func offerCredentialSetup(for session: CloudMachineSession, context: AppActionContext) async {
+        let services = context.services
         let cloud = context.services.cloud
         let teamID = cloud.auth.teamID
         let userID = cloud.auth.user?.id

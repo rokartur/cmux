@@ -1,4 +1,5 @@
-import CmuxNextApp
+@testable import CmuxNextApp
+import CmuxNextCloud
 import Testing
 
 @Suite("Cloud workspace setup")
