@@ -351,7 +351,17 @@ enum ActiveLookScope {
         if let materialSite {
             // Calibrated: only an inactive answer in an active-look window can change.
             guard !answer, keepsActiveLook(window) else { return answer }
-            return reader(depth: forcingDepth) == materialSite
+            let hit = reader(depth: forcingDepth) == materialSite
+            if hit, windows.isEmpty {
+                let syms = Thread.callStackSymbols
+                let key = syms.filter { $0.contains("AppKit") || $0.contains("QuartzCore") || $0.contains("cmux DEV") }.map { l -> String in let p = l.split(separator: " ", omittingEmptySubsequences: true); return p.count > 3 ? String(p[3...].joined(separator: " ").prefix(90)) : l }.filter { !$0.contains("ActiveLookScope") }.prefix(30).joined(separator: "\n  ")
+                if d18Seen.insert(key).inserted, d18Seen.count < 12 {
+                    let url = URL(fileURLWithPath: "/tmp/cmux-glass-diag18.txt")
+                    let data = Data(("UNSCOPED\n  " + key + "\n").utf8)
+                    if let h = try? FileHandle(forWritingTo: url) { h.seekToEndOfFile(); h.write(data); try? h.close() } else { try? data.write(to: url) }
+                }
+            }
+            return hit
         }
         // Calibrating: only reads inside a glass update for this window count.
         guard windows.last == ObjectIdentifier(window) else { return answer }
@@ -378,6 +388,7 @@ enum ActiveLookScope {
     }
 
     nonisolated(unsafe) private static var keepsActiveLookKey: UInt8 = 0
+    static var d18Seen: Set<String> = []
 
     /// Marks `window` as holding an ``ActiveLookGlassEffectView``: the material read of every glass
     /// graph in it answers active from then on.
