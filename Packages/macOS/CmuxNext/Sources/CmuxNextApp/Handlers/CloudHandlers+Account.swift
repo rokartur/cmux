@@ -72,7 +72,13 @@ extension CloudHandlers {
             request.script = try await request.loadScript(work: services.work)
             let creation = creationFlow(context, startedByPerson: true, askedBy: askedBy).start(in: window, existing: nil, request: request)
             guard case .created? = await settledCreation(creation, in: cloud.creations), let session = creation.session else { return }
-            for await stage in ObservationStream({ creation.stage }) {
+            // End the observer when creation is dismissed or removed. A completed workspace
+            // can already have replaced its progress row before this observer starts.
+            for await stage in ObservationStream({
+                creation.workspaceID != nil ? CloudMachineStage.ready :
+                    (cloud.creations.creation(creation.id) == nil ? nil : creation.stage)
+            }) {
+                guard let stage else { return }
                 if stage == .ready { break }
                 if stage.isFinished { return }
             }
