@@ -95,7 +95,7 @@ enum CloudPresenter {
         if provider == .claude {
             body = "cmux will run claude setup-token in a visible local terminal, then install the resulting one-year login on this owner VM for \(teamName)."
         } else {
-            body = "cmux will start a fresh Codex device login in a visible local terminal for this VM. Codex refresh credentials are never copied between VMs; Codex requires a separate sign-in for each VM."
+            body = "cmux will start a fresh Codex device login on this Mac, then keep the account's broker renewal available for this owner VM. No Codex credential file is copied between VMs."
         }
         let spec = CmuxDialogSpec(
             title: "Set up \(providerName) on \(session.machine.title)?",
@@ -113,10 +113,17 @@ enum CloudPresenter {
                 await services?.openLocalProviderLogin(line) ?? false
             })
         do {
-            try await transfer.run(api: services.cloud.api,
-                                   currentTeamID: { services.cloud.auth.teamID },
-                                   currentUserID: { services.cloud.auth.user?.id },
-                                   confirmed: true, refresh: true)
+            if provider == .codex {
+                let scope = CloudCodexBrokerScope(userID: userID, teamID: teamID)
+                try await services.cloud.codexBroker.run(
+                    machineID: session.machineID, scope: scope, confirmed: true, forceRefresh: true,
+                    presentDeviceCode: { prompt in await presentCodexDeviceCode(prompt, in: window) })
+            } else {
+                try await transfer.run(api: services.cloud.api,
+                                       currentTeamID: { services.cloud.auth.teamID },
+                                       currentUserID: { services.cloud.auth.user?.id },
+                                       confirmed: true, refresh: true)
+            }
             guard services.cloud.auth.user?.id == userID, services.cloud.auth.teamID == teamID,
                   let (currentTab, _) = services.locateTab(chat),
                   currentTab === tab,
@@ -133,6 +140,16 @@ enum CloudPresenter {
             CloudPresenter.failure(error, in: window)
             return false
         }
+    }
+
+    @MainActor private static func presentCodexDeviceCode(_ prompt: CloudCodexLoginPrompt, in window: NSWindow) async -> Bool {
+        let spec = CmuxDialogSpec(
+            title: "Sign in to Codex",
+            lines: ["Open \(prompt.verificationURL.absoluteString)", "Enter this one-time code: \(prompt.userCode)", "Keep cmux open while the broker finishes signing in and delivers access to the VM."],
+            buttons: [.cancel("Cancel"), CmuxDialogButton(id: "signedIn", title: "I signed in", role: .default)],
+            identifier: "cmux.dialog.cloud.codexDeviceCode")
+        let answer = await CmuxDialogCenter.shared.present(spec, in: .window(window))
+        return answer.button == "signedIn" && !answer.isDismissal
     }
 
     /// Use the same installed CLI and user as the credentials. Old/root-layout machines fail
