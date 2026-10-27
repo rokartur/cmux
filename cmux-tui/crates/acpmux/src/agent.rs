@@ -1245,6 +1245,9 @@ impl ChildAgent {
     ) -> Result<Value, RpcError> {
         let _using = self.idle_use.read().await;
         if *self.retired.lock().unwrap_or_else(|e| e.into_inner()) {
+            if let Some(fence) = fence {
+                fence.cut();
+            }
             return Err(RpcError::internal("agent process closed"));
         }
         let id = self.next_id.fetch_add(1, Ordering::SeqCst);
