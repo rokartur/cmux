@@ -354,7 +354,7 @@ import CmuxNextCompat
         guard let socket else { return AgentPaneFlush(delivered: false, more: false) }
         let batch = socket.take(maximumFrames: limits.maximumFramesPerFlush, maximumBytes: limits.maximumBytesPerFlush)
         // A peer of this Mac's daemon that has not enrolled this Mac refused its signed allow.
-        if let peer = decisions.takeRefusal(), !remoteWire { onPeerApprovalsOff?(.notEnrolled(peer: peer)) }
+        if decisions.takeRefusal() != nil, !remoteWire { onRemoteApprovalsOff?(nil) }
         guard !batch.frames.isEmpty || batch.closed != nil else { return AgentPaneFlush(delivered: false, more: batch.more) }
         flushes += 1
         let event = AgentPaneTransportEvent(connection: current, frames: batch.frames, closed: batch.closed)

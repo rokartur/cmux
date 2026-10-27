@@ -62,7 +62,7 @@ extension AgentPaneTransport {
             return
         }
         guard context.allowOnce.contains(option), Self.param("annotations", box) == nil else {
-            onPeerApprovalsOff?(.onceOnly)
+            onRemoteApprovalsOff?(nil)
             return
         }
         guard let decision = AcpmuxMacApprover.shared.decision(instance: context.instance, session: session, permission: permission,
