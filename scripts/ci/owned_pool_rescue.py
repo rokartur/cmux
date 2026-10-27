@@ -1571,8 +1571,10 @@ class GitHub:
     def branch_head(self, branch: str) -> str:
         return str(((self.request("GET", f"/branches/{branch}") or {}).get("commit") or {}).get("sha") or "")
 
-    def cancel(self, run_id: int) -> None:
-        self.request("POST", f"/actions/runs/{run_id}/cancel")
+    def cancel(self, run_id: int, before_retry: Callable[[], None] | None = None) -> None:
+        """Cancel the run. `before_retry` runs before a cancel sent again after a rate-limit wait (it raises
+        Aborted to drop it), so a nightly whose sibling started during the wait is left alone."""
+        self.request("POST", f"/actions/runs/{run_id}/cancel", before_retry=before_retry)
 
     def force_cancel(self, run_id: int) -> None:
         self.request("POST", f"/actions/runs/{run_id}/force-cancel")
@@ -2212,6 +2214,26 @@ def pull_moved(api: GitHub, target: Target, sleep: Callable[[float], None],
     return ""
 
 
+# rescue()'s answer when a nightly it was about to cancel had a job running: follow() then watches the run again.
+NIGHTLY_BUSY = "not rescued: started nightly work is running"
+
+
+def nightly_cancel(api: GitHub, target: Target, sleep: Callable[[float], None], log: Callable[[str], None]) -> None:
+    """api.cancel, which for a nightly reads the jobs again before a cancel retried after a rate-limit wait."""
+    if not target.nightly:
+        api.cancel(target.run_id)
+        return
+
+    def check() -> None:
+        busy = started_nightly_work(api, target, sleep, log)
+        if busy:
+            raise Aborted(f"{busy} of nightly run {target.run_id} started during a rate-limit wait; not cancelled")
+    try:
+        api.cancel(target.run_id, before_retry=check)
+    except TypeError:
+        api.cancel(target.run_id)  # a client without the retry hook (the tests' fakes)
+
+
 def started_nightly_work(api: GitHub, target: Target, sleep: Callable[[float], None],
                          log: Callable[[str], None]) -> str:
     """For a nightly, the jobs of it running right now (any pool: owned, Blacksmith, Linux), read just before a
@@ -2264,8 +2286,8 @@ def rescue(api: GitHub, target: Target, *, now: Callable[[], dt.datetime], sleep
             return f"not rescued: {moved}"
         busy = started_nightly_work(api, target, sleep, log)
         if busy:
-            return f"not rescued: {moved}, but {busy} of this nightly are running; a started nightly is never cancelled"
-        api.cancel(target.run_id)
+            return f"{NIGHTLY_BUSY} ({busy}); {moved}, but a started nightly is never cancelled"
+        nightly_cancel(api, target, sleep, log)
         return f"cancelled run {target.run_id}, not re-run: {moved}"
     if moved:
         return f"not rescued: {moved}"
@@ -2303,8 +2325,8 @@ def rescue(api: GitHub, target: Target, *, now: Callable[[], dt.datetime], sleep
             return f"not rescued: a DEV feed compile started on {slot}; a started dev build is never cancelled"
     busy = started_nightly_work(api, target, sleep, log)
     if busy:
-        return f"not rescued: {busy} of this nightly are running; a started nightly is never cancelled"
-    api.cancel(target.run_id)
+        return f"{NIGHTLY_BUSY} ({busy}); a started nightly is never cancelled"
+    nightly_cancel(api, target, sleep, log)
     log(f"cancelled run {target.run_id}")
     started = now()
     # Time spent waiting through rate limits (GitHub.request) is not the run's settling time:
@@ -2549,6 +2571,16 @@ def follow(client: GitHub, target: Target, *, seconds: int, queue_rounds: str | 
                         refused=(outcome == "refused") if target.e2e or target.side else None,
                         refusal=outcome == "refused")
         log(result)
+        if result.startswith(NIGHTLY_BUSY):
+            # A sibling started after the look: watch on, as before, until nothing else runs or the watch ends.
+            if clock() >= deadline:
+                return "stopped: watch limit reached with a started nightly still running"
+            outcome, reason = watch(client, target, budget_seconds=first_budget, now=clock, sleep=sleep, log=log,
+                                    deadline=deadline, floor_seconds=effective_seconds, seen=seen)
+            if outcome not in ("rescue", "refused"):
+                return f"stopped: {reason}"
+            log(f"{'rescue' if outcome == 'rescue' else 'refused'}: {reason}")
+            continue
         # Only an E2E full re-run picks a new runner in this watch. Other CI
         # re-runs are resumed by the sweeper through owned_reruns().
         if not target.e2e or not result.startswith("re-ran every job") or target.attempt + 1 > LAST_OWNED_ATTEMPT:

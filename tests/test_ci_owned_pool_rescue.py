@@ -2554,7 +2554,46 @@ class Nightly(unittest.TestCase):
             result = rescue.rescue(api, target, now=clock.now, sleep=clock.sleep, log=lambda _: None,
                                    failed_only=True)
             self.assertNotIn("cancel", api.calls, moved)
-            self.assertIn("publish-nightly of this nightly are running", result)
+            self.assertTrue(result.startswith(rescue.NIGHTLY_BUSY), result)
+            self.assertIn("publish-nightly", result)
+
+    def test_the_watch_resumes_and_moves_the_build_once_the_late_sibling_ends(self):
+        # The look sees nothing else running; then a Linux sibling starts before the cancel and ends at 600 s.
+        def jobs(seconds):
+            found = nightly_run(helper_done_at=0)(seconds)
+            if 60 <= seconds < 600:
+                found.append(job("publish-nightly", labels=["blacksmith-2vcpu-ubuntu-2404"], status="in_progress",
+                                 runner="linux"))
+            return found
+        clock = Clock()
+        api = NightlyAPI(clock, jobs)
+        target = rescue.Target(RUN_ID, 1, HEAD, 0, side=True, nightly=True, path=rescue.NIGHTLY_WORKFLOW_PATH)
+        lines = []
+        result = rescue.follow(api, target, seconds=30, queue_rounds="0", now=clock.now, sleep=clock.sleep,
+                               log=lines.append)
+        self.assertEqual(result, "done")
+        self.assertIn("cancel", api.calls)
+        self.assertGreaterEqual(api.first_cancel, 600)
+        self.assertEqual(api.calls[-1], "rerun-failed")
+
+    def test_a_retried_cancel_of_a_nightly_reads_its_jobs_again(self):
+        class Limited(rescue.GitHub):
+            def __init__(self):
+                super().__init__("t", "manaflow-ai/cmux")
+                self.sent = []
+
+            def request(self, method, path, *, own_token=False, body=None, before_retry=None):
+                self.sent.append(path)
+                if before_retry is not None:
+                    before_retry()  # as GitHub.request does before sending again after a rate-limit wait
+                return {}
+
+            def jobs(self, run_id, attempt):
+                return [job("publish-nightly", status="in_progress", runner="linux")]
+        api = Limited()
+        target = rescue.Target(RUN_ID, 1, HEAD, 0, side=True, nightly=True, path=rescue.NIGHTLY_WORKFLOW_PATH)
+        with self.assertRaises(rescue.Aborted):
+            rescue.nightly_cancel(api, target, lambda _: None, lambda _: None)
 
     def test_a_linux_sibling_blocks_the_look_too(self):
         jobs = nightly_run(helper_done_at=0)(30 * 60) + [
