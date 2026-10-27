@@ -923,3 +923,6 @@ async fn a_fenced_line_to_a_closed_stdin_settles() {
     wait_dead(lock).await;
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[path = "agent_host_idle.rs"]
+mod idle_pid_only;

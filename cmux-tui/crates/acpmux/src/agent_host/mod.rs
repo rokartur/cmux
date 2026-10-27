@@ -18,6 +18,8 @@
 //! lock file the host holds for its whole life.
 
 #[cfg(unix)]
+mod hibernate;
+#[cfg(unix)]
 pub mod host;
 /// Windows port: the agent host process comes in a later landing.
 #[cfg(not(unix))]
@@ -92,6 +94,8 @@ pub enum ControllerFrame {
     Ack { h: u64 },
     /// End the harness process group: SIGTERM, then SIGKILL after `grace_ms`.
     Terminate { grace_ms: u64 },
+    /// Optional query capability: only the held leader, fenced by the output watermark.
+    Hibernate { id: u64, generation: u64, grace_ms: u64 },
     /// The controller is going away; the host answers `detach_ack` after
     /// every prior frame and keeps the harness running.
     Detach,
@@ -137,6 +141,9 @@ pub enum HostFrame {
         claude_session_id: Option<String>,
         modes: Option<Value>,
         config_options: Option<Value>,
+        /// Absent on older hosts and unsupported harness reporters.
+        #[serde(default)]
+        idle_generation: Option<u64>,
     },
 }
 

@@ -16,6 +16,7 @@ use tokio::process::Child;
 use tokio::sync::{Mutex, mpsc, oneshot};
 
 mod command;
+mod idle;
 #[cfg(unix)]
 pub(crate) mod session_tmp;
 pub(crate) use command::{
@@ -511,6 +512,10 @@ pub struct ChildAgent {
     /// Set once acpmux ends the agent on purpose (MDM's off, `end_managed_full_access`): its
     /// turn's end leaves the chat idle and no failover runs its prompt again (review 3 of #26034).
     ended_on_purpose: std::sync::atomic::AtomicBool,
+    /// Requests hold shared access until their answer; idle retirement takes exclusive access.
+    pub(crate) idle_use: tokio::sync::RwLock<()>,
+    idle_pid_only: std::sync::atomic::AtomicBool,
+    idle_activity: AtomicU64,
     /// The question preview format its command was pinned to, for a direct
     /// start (a host's is recorded where the host starts, `hub/hosts.rs`).
     pub preview_format: Option<crate::hub::questions::PreviewFormat>,
@@ -628,6 +633,9 @@ impl ChildAgent {
             all_tools: std::sync::atomic::AtomicBool::new(false),
             retired: std::sync::Mutex::new(false),
             ended_on_purpose: std::sync::atomic::AtomicBool::new(false),
+            idle_use: tokio::sync::RwLock::new(()),
+            idle_pid_only: std::sync::atomic::AtomicBool::new(false),
+            idle_activity: AtomicU64::new(0),
             generation: NEXT_GENERATION.fetch_add(1, Ordering::Relaxed),
             preview_format,
             writer_stop: std::sync::OnceLock::new(),
@@ -712,7 +720,8 @@ impl ChildAgent {
                                 leader_gone = Some(tokio::time::Instant::now());
                                 // Stop what the agent left running so the pipe closes.
                                 #[cfg(unix)]
-                                if let Some(pg) = agent_for_exit.pid {
+                                if let Some(pg) = agent_for_exit.pid
+                                    && !agent_for_exit.idle_pid_only.load(Ordering::SeqCst) {
                                     unsafe {
                                         libc::killpg(pg as i32, libc::SIGKILL);
                                     }
@@ -920,6 +929,7 @@ impl ChildAgent {
     /// (`process_state`) from a retired agent (None).
     /// For such an update the retire lock is held across the check and `log`.
     fn tap_live<R>(&self, m: &Message, log: impl FnOnce() -> R) -> Option<R> {
+        self.idle_activity.fetch_add(1, Ordering::SeqCst);
         let context = matches!(m, Message::Notification { method, params }
             if method == crate::rpc::method::SESSION_UPDATE
                 && params.as_ref().is_some_and(process_state));
@@ -1229,6 +1239,10 @@ impl ChildAgent {
         fence: Option<&Fence>,
         on_written: F,
     ) -> Result<Value, RpcError> {
+        let _using = self.idle_use.read().await;
+        if *self.retired.lock().unwrap_or_else(|e| e.into_inner()) {
+            return Err(RpcError::internal("agent process closed"));
+        }
         let id = self.next_id.fetch_add(1, Ordering::SeqCst);
         let (tx, rx) = oneshot::channel();
         self.pending.lock().await.map.insert(key(&Value::from(id)), tx);
@@ -1276,6 +1290,10 @@ impl ChildAgent {
         params: Value,
         limit: std::time::Duration,
     ) -> Option<Result<Value, RpcError>> {
+        let _using = self.idle_use.read().await;
+        if *self.retired.lock().unwrap_or_else(|e| e.into_inner()) {
+            return Some(Err(RpcError::internal("agent process closed")));
+        }
         let id = self.next_id.fetch_add(1, Ordering::SeqCst);
         let (tx, rx) = oneshot::channel();
         self.pending.lock().await.map.insert(key(&Value::from(id)), tx);
@@ -1516,6 +1534,9 @@ impl ChildAgent {
             all_tools: std::sync::atomic::AtomicBool::new(false),
             retired: std::sync::Mutex::new(false),
             ended_on_purpose: std::sync::atomic::AtomicBool::new(false),
+            idle_use: tokio::sync::RwLock::new(()),
+            idle_pid_only: std::sync::atomic::AtomicBool::new(false),
+            idle_activity: AtomicU64::new(0),
             generation: NEXT_GENERATION.fetch_add(1, Ordering::Relaxed),
             preview_format: None,
             writer_stop: std::sync::OnceLock::new(),

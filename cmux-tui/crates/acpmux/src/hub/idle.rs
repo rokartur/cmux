@@ -27,6 +27,7 @@ impl Hub {
 
     /// Something happened in `session`: its idle period starts again.
     pub(super) fn touch(&self, session: &Session) {
+        session.activity_generation.fetch_add(1, Ordering::SeqCst);
         session.last_active.store(self.clock_now(), Ordering::Relaxed);
     }
 
@@ -39,10 +40,11 @@ impl Hub {
             && session.attached.load(Ordering::SeqCst) == 0
             && matches!(session.status(), SessionStatus::Ready | SessionStatus::Idle)
             && session.turn().is_none()
-            && session.turn_lock.try_lock().is_ok()
+            && !session.harness_turn.load(Ordering::SeqCst)
+            && session.asks_in_flight.load(Ordering::SeqCst) == 0
+            && !self.secrets.waiting_in(&session.id)
             && session.queued() == 0
             && session.pending_permissions().is_empty()
-            && session.spawn_lock.try_lock().is_ok()
             // A process still running in the background (a dev server, a
             // watcher) ends with the harness: never reap it for idleness.
             && !self.any_process_running(session)
@@ -54,6 +56,7 @@ impl Hub {
     /// `shutdown_all`): the idle reaper never stops a harness again.
     pub fn stop_idle_reaper(&self) {
         self.stopping.store(true, Ordering::SeqCst);
+        self.idle_wake.notify_one();
     }
 
     /// A child was published: make sure the reaper runs and sees it.
@@ -70,6 +73,9 @@ impl Hub {
         loop {
             let (next, clock) = {
                 let Some(hub) = weak.upgrade() else { return };
+                if hub.stopping.load(Ordering::SeqCst) {
+                    return;
+                }
                 let clock = hub.clock.lock().unwrap().clone();
                 // The same task ends stalled turns (`stalled_turn.rs`).
                 let stalled = hub.config.read().await.stalled_turn_end();
@@ -91,6 +97,9 @@ impl Hub {
             }
             let Some(hub) = weak.upgrade() else { return };
             hub.end_every_managed_full_access(hub.full_access_managed_off()).await;
+            if hub.stopping.load(Ordering::SeqCst) {
+                return;
+            }
             if let Some(stalled) = hub.config.read().await.stalled_turn_end() {
                 hub.settle_stalled_turns(stalled);
             }
@@ -126,23 +135,39 @@ impl Hub {
             if !has_child {
                 continue;
             }
-            if self.idle_eligible(&session) {
-                tracing::info!(session = %session.id, "idle harness exits; the session resumes on its next prompt");
-                // A hosted child whose link is closed cannot take a Terminate
-                // frame: end its host with the nonce proof, as closing does.
-                let child = session.child.lock().await.clone();
-                let link_lost = match &child {
-                    Some(c) => c.host_record().is_some() && !c.is_alive().await,
-                    None => false,
-                };
-                self.detach_child(&session).await;
-                if link_lost {
-                    self.end_unadopted_host(&session).await;
-                }
-            } else {
-                // In use at its deadline: a full idle period starts now.
+            let turn = session.turn_lock.try_lock();
+            let using = session.harness_use.try_write();
+            let spawning = session.spawn_lock.try_lock();
+            if turn.is_err() || using.is_err() || spawning.is_err() || !self.idle_eligible(&session)
+            {
                 self.touch(&session);
+                continue;
             }
+            let mut slot = session.child.lock().await;
+            let Some(child) = slot.as_ref().cloned() else { continue };
+            let Ok(_requests) = child.idle_use.try_write() else {
+                self.touch(&session);
+                continue;
+            };
+            let activity = session.activity_generation.load(Ordering::SeqCst);
+            let Some(generation) = child.idle_generation().await else {
+                self.touch(&session);
+                continue;
+            };
+            if !self.idle_eligible(&session)
+                || child.idle_has_pending()
+                || activity != session.activity_generation.load(Ordering::SeqCst)
+                || session.last_active.load(Ordering::Relaxed).saturating_add(idle)
+                    > self.clock_now()
+                || !child.hibernate(generation).await
+            {
+                self.touch(&session);
+                continue;
+            }
+            // Clear only after the same held child has exited. A send waits on our spawn lease.
+            slot.take();
+            self.set_status(&session, SessionStatus::Idle);
+            self.append(&session, "mux", "hibernated", json!({}));
         }
     }
 }

@@ -535,6 +535,12 @@ enum Setting {
 }
 
 impl Translator {
+    /// Reported background work, including shells whose initial tool call already ended.
+    pub(crate) async fn has_background_work(&self) -> bool {
+        !self.background_subagents.lock().await.is_empty()
+            || self.background_shells.lock().await.values().any(|shell| shell.background)
+    }
+
     pub fn new(acp_session_id: String, mode: &str, model: &str, effort: &str) -> Arc<Self> {
         Arc::new(Self {
             pending: Mutex::new(HashMap::new()),

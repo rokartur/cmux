@@ -91,6 +91,10 @@ fn update(exec: &Exec, state: &str, extra: Value) -> Out {
 }
 
 impl Background {
+    pub(super) fn has_work(&self) -> bool {
+        !self.open.is_empty() || !self.running.is_empty() || !self.asked.is_empty()
+    }
+
     /// A hub request the bridge sends itself: a terminate, under an id of
     /// its own. None for any other message.
     pub(super) fn request(&mut self, msg: &Value) -> Option<Vec<Out>> {

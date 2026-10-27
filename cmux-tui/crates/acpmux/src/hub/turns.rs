@@ -1071,6 +1071,8 @@ impl Hub {
         mut params: Value,
         granted: bool,
     ) -> Result<Value, RpcError> {
+        self.touch(session);
+        let _using = session.harness_use.read().await;
         // Every switch into a mode that skips approvals, from any client (the app, the CLI, a
         // script), passes here: refused while `sessions.allowFullAccess` is off.
         if super::start_mode::requests_full_access(m, &params) && !self.full_access_allowed() {

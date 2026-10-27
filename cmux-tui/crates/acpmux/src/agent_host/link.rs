@@ -148,6 +148,7 @@ pub struct QueryReply {
     pub claude_session_id: Option<String>,
     pub modes: Option<Value>,
     pub config_options: Option<Value>,
+    pub idle_generation: Option<u64>,
 }
 
 type Queries = Arc<std::sync::Mutex<std::collections::HashMap<u64, oneshot::Sender<QueryReply>>>>;
@@ -409,10 +410,15 @@ async fn connect_inner_max(record: HostRecord, resume_after: u64, max: u16) -> R
                         claude_session_id,
                         modes,
                         config_options,
+                        idle_generation,
                     })) => {
                         if let Some(reply) = queries.lock_or_recover().remove(&id) {
-                            let _ =
-                                reply.send(QueryReply { claude_session_id, modes, config_options });
+                            let _ = reply.send(QueryReply {
+                                claude_session_id,
+                                modes,
+                                config_options,
+                                idle_generation,
+                            });
                         }
                     }
                     Ok(Some(_)) | Ok(None) | Err(_) => break,
@@ -519,14 +525,32 @@ impl Link {
         let id = self.next_query.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         let (tx, rx) = oneshot::channel();
         self.queries.lock_or_recover().insert(id, tx);
-        self.send(ControllerFrame::Query { id }).await?;
-        match within("query", budget, rx).await {
-            Ok(reply) => reply.map_err(|_| anyhow!("agent host closed before it answered")),
-            Err(timeout) => {
-                self.queries.lock_or_recover().remove(&id);
-                Err(timeout.into())
-            }
-        }
+        let result = within("query", budget, async {
+            self.send(ControllerFrame::Query { id }).await?;
+            rx.await.map_err(|_| anyhow!("agent host closed before it answered"))
+        })
+        .await;
+        self.queries.lock_or_recover().remove(&id);
+        result?
+    }
+
+    /// Supported only after a query returned an idle watermark; old hosts never receive it.
+    pub async fn hibernate(&self, generation: u64, grace: std::time::Duration) -> Result<bool> {
+        let id = self.next_query.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let (tx, rx) = oneshot::channel();
+        self.queries.lock_or_recover().insert(id, tx);
+        let result = within("hibernate", QUERY_BUDGET, async {
+            self.send(ControllerFrame::Hibernate {
+                id,
+                generation,
+                grace_ms: grace.as_millis() as u64,
+            })
+            .await?;
+            Ok::<_, anyhow::Error>(rx.await?.idle_generation == Some(generation))
+        })
+        .await;
+        self.queries.lock_or_recover().remove(&id);
+        result?
     }
 
     pub fn is_closed(&self) -> bool {

@@ -216,12 +216,10 @@ async fn a_failed_model_probe_is_reported_with_its_reason() {
     assert!(listed["harnesses"]["fake"].get("probeError").is_none(), "{listed}");
 }
 
-/// A session's harness that nobody uses exits after the idle period
-/// (measured on the hub's injected clock): no client attached, no turn, no
-/// activity. The session keeps its record and resumes on the next prompt.
-/// An attached session's harness stays.
+/// An opaque ACP harness cannot report background work and stays awake,
+/// whether detached or attached. Its next prompt still uses the same session.
 #[tokio::test]
-async fn an_idle_detached_session_harness_exits_and_resumes_on_the_next_prompt() {
+async fn an_idle_opaque_harness_without_background_reporting_stays_awake() {
     let (hub, mut c) = setup(PermissionPolicy::ApproveAll).await;
     let clock = acpmux::clock::ManualClock::new();
     hub.set_clock(clock.clone());
@@ -245,15 +243,12 @@ async fn an_idle_detached_session_harness_exits_and_resumes_on_the_next_prompt()
     settle().await;
     assert_eq!(status("idle-gone"), "ready", "stopped before the idle period ended");
     clock.advance(Duration::from_secs(2));
-    let deadline = std::time::Instant::now() + Duration::from_secs(20);
-    while status("idle-gone") != "idle" {
-        assert!(std::time::Instant::now() < deadline, "the idle harness never exited");
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
+    settle().await;
+    assert_eq!(status("idle-gone"), "ready", "unsupported harness was retired");
     clock.advance(Duration::from_secs(900));
     settle().await;
     assert_eq!(status("idle-attached"), "ready", "an attached session's harness was stopped");
-    // The stopped session resumes on its next prompt.
+    // The retained session answers its next prompt.
     let r = c
         .request(
             method::SESSION_PROMPT,
@@ -264,7 +259,7 @@ async fn an_idle_detached_session_harness_exits_and_resumes_on_the_next_prompt()
     assert_eq!(r["stopReason"], "end_turn");
     let kinds: Vec<String> =
         hub.events(&ids[0], 0, 1000).unwrap().into_iter().map(|e| e.kind).collect();
-    assert!(kinds.iter().any(|k| k == "resumed"), "{kinds:?}");
+    assert!(!kinds.iter().any(|k| k == "resumed"), "{kinds:?}");
 }
 
 /// Shutdown owns every child from its first step: once it stopped the idle
