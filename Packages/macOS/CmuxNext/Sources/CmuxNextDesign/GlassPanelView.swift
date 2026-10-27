@@ -226,6 +226,8 @@ final class ActiveLookGlassEffectView: NSGlassEffectView {
         typealias Method = @convention(c) (NSView, Selector) -> Void
         let selector = NSSelectorFromString("_windowChangedKeyState")
         guard let implementation = Self.superImplementation(selector) else { return }
+        ActiveLookScope.keyChanges += 1
+        ActiveLookScope.dlog("keychange \(ActiveLookScope.keyChanges) key=\(window?.isKeyWindow ?? false) marked=\(window.map { ActiveLookScope.keepsActiveLook($0) } ?? false)")
         ActiveLookScope.during(window) { unsafeBitCast(implementation, to: Method.self)(self, selector) }
     }
 
@@ -333,6 +335,7 @@ enum ActiveLookScope {
 
     /// Runs `body`, a glass update for `window`, with that window's material read forced active.
     static func during(_ window: NSWindow?, _ body: () -> Void) {
+        tags.append("glass"); defer { tags.removeLast() }
         guard enter(window) else { return body() }
         defer { leave() }
         body()
@@ -402,6 +405,8 @@ enum ActiveLookScope {
     /// Runs `body`, an update of `view`, in the scope of its glass's window (see ``glassWindow(of:)``).
     @available(macOS 26.0, *)
     nonisolated private static func scoped(_ view: NSView, _ body: () -> Void) {
+        if pthread_main_np() != 0 { MainActor.assumeIsolated { tags.append((glassWindow(of: view) != nil ? "S:" : "U:") + String(describing: type(of: view.superview ?? view)).prefix(30)) } }
+        defer { if pthread_main_np() != 0 { MainActor.assumeIsolated { _ = tags.popLast() } } }
         guard pthread_main_np() != 0, MainActor.assumeIsolated({ enter(glassWindow(of: view)) }) else { return body() }
         body()
         MainActor.assumeIsolated { leave() }
@@ -460,6 +465,15 @@ enum ActiveLookScope {
         return count >= confirmations ? pair.first : nil
     }
 
+    static var keyChanges = 0
+    static var tags: [String] = []
+    static var seen: [String: Int] = [:]
+    static func dlog(_ line: String) {
+        let url = URL(fileURLWithPath: "/tmp/cmux-glass-diag16.txt")
+        let data = Data((line + "\n").utf8)
+        if let h = try? FileHandle(forWritingTo: url) { h.seekToEndOfFile(); h.write(data); try? h.close() } else { try? data.write(to: url) }
+    }
+
     private static func finishCalibration() {
         defer { pending.removeAll() }
         // An update with no calibration reads (no graph update) says nothing.
@@ -484,7 +498,29 @@ enum ActiveLookScope {
         { window in
             let answer = original(window, selector)
             guard pthread_main_np() != 0 else { return answer }
-            return MainActor.assumeIsolated { decide(window, answer: answer) }
+            return MainActor.assumeIsolated {
+                let result = decide(window, answer: answer)
+                if keyChanges > 0, String(describing: type(of: window)) == "ShellWindow" {
+                    var fr = [UnsafeMutableRawPointer?](repeating: nil, count: 60)
+                    let n = Int(fr.withUnsafeMutableBufferPointer { backtrace($0.baseAddress, 60) })
+                    var reader = "?"
+                    var cmuxFrames: [String] = []
+                    for i in 0..<n {
+                        var info = Dl_info()
+                        guard dladdr(fr[i], &info) != 0, let f = info.dli_fname else { continue }
+                        let path = String(cString: f)
+                        let sym = info.dli_sname.map { String(cString: $0) } ?? "?"
+                        if reader == "?", path.hasSuffix("/AppKit") { reader = sym + "+\(UInt(bitPattern: fr[i]) - UInt(bitPattern: info.dli_saddr))" }
+                        if reader != "?", !path.hasSuffix("/AppKit"), !path.contains("SwiftUI"), !path.contains("AttributeGraph"), !sym.contains("ActiveLookScope"), !sym.contains("TR"), cmuxFrames.count < 3 { cmuxFrames.append(String(sym.prefix(70))) }
+                    }
+                    if reader.hasSuffix("+1584") {
+                        let key = "M kc=\(keyChanges) tags=\(tags.suffix(4)) a=\(answer) -> \(result) | \(cmuxFrames.joined(separator: " < "))"
+                        seen[key, default: 0] += 1
+                        if seen[key] == 1 { dlog(key) }
+                    }
+                }
+                return result
+            }
         }
     }
 
