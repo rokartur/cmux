@@ -2451,6 +2451,10 @@ async fn a_report_of_an_agent_mdm_ended_leaves_the_next_agent_alone() {
         let again = rpc.reply("session/prompt", next).await;
         assert_eq!(again["result"]["stopReason"], "end_turn", "{answered} {again}");
     }
+    let hosts: Vec<_> = std::fs::read_dir(daemon.home.join("hosts")).map(|d| d.filter_map(|e| e.ok().map(|e| e.file_name())).collect()).unwrap_or_default();
+    let kinds: Vec<String> = daemon.events(&session).iter().map(|e| format!("{} {} {}", e["dir"], e["kind"], e["msg"].to_string().chars().take(160).collect::<String>())).collect();
+    panic!("PROBE hosts={hosts:?} answered={answered} kinds={kinds:#?}");
+    #[allow(unreachable_code)]
     let next_pid = daemon.host_record(&session)["harness_pid"].as_i64().unwrap();
     assert_ne!(next_pid, first_pid);
     // Past the held report.
