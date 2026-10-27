@@ -17,7 +17,7 @@ pub(super) async fn wait(
     activity: Arc<AtomicU64>,
     mut stop: tokio::sync::mpsc::Receiver<Request>,
 ) -> Option<i32> {
-    let Some(pid) = child.id().map(|p| p as i32) else { return None };
+    let pid = child.id().map(|p| p as i32)?;
     let mut exited = tokio::task::spawn_blocking(move || super::host::wait_exit_unreaped(pid));
     let proof = loop {
         tokio::select! {
