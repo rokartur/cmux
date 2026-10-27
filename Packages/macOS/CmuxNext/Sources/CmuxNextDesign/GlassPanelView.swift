@@ -374,6 +374,15 @@ enum ActiveLookScope {
             scope(hostClass, NSSelectorFromString(name))
         }
         scopeSize(hostClass, NSSelectorFromString("_layoutSubtreeWithOldSize:"))
+        if let m = class_getInstanceMethod(hostClass, #selector(getter: NSView.window)) {
+            typealias G = @convention(c) (NSView, Selector) -> NSWindow?
+            let prev = unsafeBitCast(method_getImplementation(m), to: G.self)
+            let blk: @convention(block) (NSView) -> NSWindow? = { v in
+                if pthread_main_np() != 0 { MainActor.assumeIsolated { lastAsked = (ObjectIdentifier(v), glassWindow(of: v) != nil, askSeq); askSeq += 1 } }
+                return prev(v, #selector(getter: NSView.window))
+            }
+            class_replaceMethod(hostClass, #selector(getter: NSView.window), imp_implementationWithBlock(blk), method_getTypeEncoding(m))
+        }
         scopePointer(hostClass, NSSelectorFromString("_updateConstraintsForSubtreeIfNeededCollectingViewsWithInvalidBaselines:"))
     }
 
@@ -456,6 +465,8 @@ enum ActiveLookScope {
 
     static var keyChanges = 0
     static var tags: [String] = []
+    static var lastAsked: (ObjectIdentifier, Bool, Int)?
+    static var askSeq = 0
     static var fullDumps = 0
     static var lastLine = ""
     static var repeatCount = 0
@@ -506,7 +517,7 @@ enum ActiveLookScope {
                         if tags.isEmpty {
                             extra = " | " + Thread.callStackSymbols.dropFirst(10).filter { $0.contains("cmux DEV") && !$0.contains("TR +") }.prefix(5).map { l -> String in let p = l.split(separator: " ", omittingEmptySubsequences: true); return p.count > 3 ? String(p[3...].joined(separator: " ").prefix(70)) : l }.joined(separator: " < ")
                         }
-                        dlog("M kc=\(keyChanges) tags=\(tags.suffix(3)) in=\(windows.last == ObjectIdentifier(window)) a=\(answer) -> \(result)\(extra)")
+                        dlog("M kc=\(keyChanges) ask=\(lastAsked.map { "\($0.1 ? "OURS" : "plain") age=\(askSeq - $0.2) id=\(String(UInt(bitPattern: $0.0.hashValue) % 10000))" } ?? "none") tags=\(tags.suffix(3)) in=\(windows.last == ObjectIdentifier(window)) a=\(answer) -> \(result)\(extra)")
                     }
                 }
                 return result
