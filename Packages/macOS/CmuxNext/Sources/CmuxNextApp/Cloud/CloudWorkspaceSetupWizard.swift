@@ -87,7 +87,7 @@ struct CloudWorkspaceSetupWizard {
         }
     }
 
-    nonisolated static func setupDialogSpec(availability: CredentialAvailability = .available,
+    static func setupDialogSpec(availability: CredentialAvailability = .available,
                                 source: Source = .empty, repository: String = "") -> CmuxDialogSpec {
         CmuxDialogSpec(
             title: CloudWorkspaceSetupWizardStrings.title,
@@ -147,7 +147,7 @@ struct CloudWorkspaceSetupWizard {
         }
     }
 
-    nonisolated static func credentialDialogSpec(machine: String, account: String) -> CmuxDialogSpec {
+    static func credentialDialogSpec(machine: String, account: String) -> CmuxDialogSpec {
         CmuxDialogSpec(
             title: CloudWorkspaceSetupWizardStrings.credentialTitle(machine),
             lines: [CloudWorkspaceSetupWizardStrings.credentialDisclosure(machine, account)],
