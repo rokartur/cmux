@@ -13,6 +13,10 @@ extension CloudHandlers {
         bind("newCloudMachine", registry, reason: reason) { invocation in
             let request = try newMachineRequest(invocation)
             let window = invocation.allowsViewChange ? context.services.windows.active?.state : nil
+            if request.isDefault, origin(of: invocation) == .user, window != nil {
+                CloudWorkspaceSetupWizard(context: context).begin(window: window, askedBy: invocation.callerAgentSession)
+                return
+            }
             let flow = creationFlow(context, startedByPerson: invocation.origin == .user, askedBy: invocation.callerAgentSession)
             guard request.isDefault else { return createRequested(request, flow: flow, window: window, context) }
             // The new machine's progress shows in the window at once; its
@@ -23,6 +27,10 @@ extension CloudHandlers {
             let target = try workspaceMachine(invocation, context)
             let window = invocation.allowsViewChange ? context.services.windows.active?.state : nil
             guard let session = target, session.daemon.connection != nil else {
+                if target == nil, origin(of: invocation) == .user, window != nil {
+                    CloudWorkspaceSetupWizard(context: context).begin(window: window, askedBy: invocation.callerAgentSession)
+                    return
+                }
                 // A new machine, or one still on its way: show its progress
                 // now. An ended app link connects again on this gesture, and
                 // a paused machine resumes (idle auto-pause).
