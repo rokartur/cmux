@@ -97,12 +97,12 @@ impl ChildAgent {
             let Some(pid) = child.id() else { return false };
             self.idle_pid_only.store(true, Ordering::SeqCst);
             self.retire();
-            // The owner task survives caller cancellation and holds the child through reap.
+            // Commit before scheduling another task: no activity gap after the fence.
+            // SAFETY: our held, unreaped child, never a group or cached PID after reap.
+            unsafe {
+                libc::kill(pid as i32, libc::SIGTERM);
+            }
             tokio::spawn(async move {
-                // SAFETY: our held, unreaped child, never a group or a cached PID after reaping.
-                unsafe {
-                    libc::kill(pid as i32, libc::SIGTERM);
-                }
                 match tokio::time::timeout(KILL_GRACE, child.wait()).await {
                     Ok(Ok(_)) => {}
                     Ok(Err(_)) => return false,
