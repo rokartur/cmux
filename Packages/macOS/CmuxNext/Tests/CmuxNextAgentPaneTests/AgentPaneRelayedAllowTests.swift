@@ -356,7 +356,8 @@ struct AgentPaneRelayedAllowTests {
 
     /// Peer-route approvals: Allow on a peer's prompt goes out signed by this Mac's approver key,
     /// over that prompt, its tool call and the option picked; the "Remote approvals are off"
-    /// notice no longer shows. An always-allow goes unsigned, and the notice shows.
+    /// notice no longer shows. An always-allow goes unsigned, and the pane says only a one-time
+    /// allow works from this Mac.
     @Test func anAllowForAPeersPromptCarriesThisMacsSignedOneTimeAllow() async throws {
         let server = AcpmuxStandInServer()
         try await server.start()
@@ -364,7 +365,9 @@ struct AgentPaneRelayedAllowTests {
         let inbox = PageInbox()
         let transport = AgentPaneTransport()
         var remoteOff = false
+        var peerOff: [AgentPanePeerApprovals] = []
         transport.onRemoteApprovalsOff = { _ in remoteOff = true }
+        transport.onPeerApprovalsOff = { peerOff.append($0) }
         let id = try await Self.peerChat(server, inbox, transport)
 
         transport.gestures.record(click: true)
@@ -389,9 +392,9 @@ struct AgentPaneRelayedAllowTests {
         let message = AcpmuxMacApprover.message(instance: Self.instance, mac: identity.id, session: "s", permission: "p1",
                                                 toolCall: "call-1", option: "yes", nonce: Self.nonce, expiresAt: expires, answers: "")
         #expect(key.isValidSignature(signature, for: message))
-        #expect(!remoteOff)
+        #expect(!remoteOff && peerOff.isEmpty)
 
-        // An always-allow: no signature, and the notice.
+        // An always-allow: no signature, and the pane says only a one-time allow works.
         transport.gestures.record(click: true)
         let alwaysIntent = try #require(Self.intent(option: "always"))
         let always = try #require(transport.reserveGesture(alwaysIntent))
@@ -401,19 +404,23 @@ struct AgentPaneRelayedAllowTests {
         _ = await inbox.frame(containing: "\"id\":8")
         let sentAlways = try #require(server.peers.first?.frames.last { $0.contains("permission_respond") })
         #expect(!sentAlways.contains("approverDecision"), "an always-allow was signed: \(sentAlways)")
-        #expect(remoteOff)
+        #expect(peerOff == [.onceOnly])
+        #expect(!remoteOff)
     }
 
     /// A peer that has not enrolled this Mac refuses the allow, naming itself (acpmux
-    /// `permission.person_required` with `data.peer`): the pane says approvals are off there.
-    @Test func aPeersRefusalShowsTheNotice() async throws {
+    /// `permission.person_required` with `data.peer`): the pane offers to enroll this Mac there,
+    /// by that peer's name, instead of "Remote approvals are off".
+    @Test func aPeersRefusalOffersToEnrollThisMacThere() async throws {
         let server = AcpmuxStandInServer()
         try await server.start()
         defer { server.stop() }
         let inbox = PageInbox()
         let transport = AgentPaneTransport()
         var remoteOff = false
+        var peerOff: [AgentPanePeerApprovals] = []
         transport.onRemoteApprovalsOff = { _ in remoteOff = true }
+        transport.onPeerApprovalsOff = { peerOff.append($0) }
         let id = try await Self.peerChat(server, inbox, transport)
         server.setAnswers(false)
 
@@ -424,9 +431,10 @@ struct AgentPaneRelayedAllowTests {
         #expect(await server.wait { $0.first?.frames.contains { $0.contains("permission_respond") } == true })
         let sent = try #require(server.peers.first?.frames.first { $0.contains("permission_respond") })
         let relayID = try #require((try JSONSerialization.jsonObject(with: Data(sent.utf8)) as? [String: Any])?["id"] as? Int)
-        #expect(!remoteOff, "the notice showed before the peer refused")
+        #expect(!remoteOff && peerOff.isEmpty, "a notice showed before the peer refused")
         server.push(#"{"jsonrpc":"2.0","id":\#(relayID),"error":{"code":-32000,"message":"approve this on the Mac app","data":{"reason":"permission.person_required","peer":"far"}}}"#, to: 0)
         _ = await inbox.frame(containing: "person_required")
-        #expect(remoteOff)
+        #expect(peerOff == [.notEnrolled(peer: "far")])
+        #expect(!remoteOff)
     }
 }

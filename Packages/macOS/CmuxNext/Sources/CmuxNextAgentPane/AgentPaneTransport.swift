@@ -91,6 +91,10 @@ import CmuxNextCompat
     /// Told when an allow went to another daemon run without the person's proof: that daemon
     /// holds no key of this app for that run, so it refuses the allow.
     public var onRemoteApprovalsOff: (@MainActor (AgentPaneRemoteApprovals?) -> Void)?
+    /// Told when a peer of this Mac's daemon did not count an allow signed by this Mac
+    /// (peer-route approvals, ``AcpmuxMacApprover``): it has not enrolled this Mac, or the allow
+    /// was not a one-time allow.
+    public var onPeerApprovalsOff: (@MainActor (AgentPanePeerApprovals) -> Void)?
     /// The pane's own roots (``AcpmuxPathPolicy/Scope/roots``), asked at each frame.
     public var roots: @MainActor () -> [String] = { [] }
     /// Folders that are roots only when the user picks one by a gesture (the new tab page's scan).
@@ -350,7 +354,7 @@ import CmuxNextCompat
         guard let socket else { return AgentPaneFlush(delivered: false, more: false) }
         let batch = socket.take(maximumFrames: limits.maximumFramesPerFlush, maximumBytes: limits.maximumBytesPerFlush)
         // A peer of this Mac's daemon that has not enrolled this Mac refused its signed allow.
-        if decisions.takeRefusal() != nil, !remoteWire { onRemoteApprovalsOff?(nil) }
+        if let peer = decisions.takeRefusal(), !remoteWire { onPeerApprovalsOff?(.notEnrolled(peer: peer)) }
         guard !batch.frames.isEmpty || batch.closed != nil else { return AgentPaneFlush(delivered: false, more: batch.more) }
         flushes += 1
         let event = AgentPaneTransportEvent(connection: current, frames: batch.frames, closed: batch.closed)

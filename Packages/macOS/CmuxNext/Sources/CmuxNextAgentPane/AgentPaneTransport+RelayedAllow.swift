@@ -52,9 +52,9 @@ extension AgentPaneTransport {
     /// An allow for a prompt of a peer of this Mac's daemon: this Mac's approver key signs it when
     /// it is a one-time allow the prompt offers (acpmux `mac_approvers::may_allow`), for the
     /// prompt and option the person picked, and the peer counts it once if it enrolled this Mac
-    /// (`acpmux host enroll`). It refuses it otherwise, naming itself, and the pane says approvals
-    /// are off there. Anything else (an always-allow, an answer with notes) goes unproved, and the
-    /// pane says the same.
+    /// (`acpmux host enroll`). It refuses it otherwise, naming itself, and the pane offers to
+    /// enroll this Mac there (``onPeerApprovalsOff``). Anything else (an always-allow, an answer
+    /// with notes) goes unproved, and the pane says only a one-time allow works from this Mac.
     private func signPeerAllow(_ box: FrameBox, session: String, permission: String, option: String,
                                context: AcpmuxDecisionContexts.Context, ticketPick: Bool) {
         guard ticketPick else {
@@ -62,7 +62,7 @@ extension AgentPaneTransport {
             return
         }
         guard context.allowOnce.contains(option), Self.param("annotations", box) == nil else {
-            onRemoteApprovalsOff?(nil)
+            onPeerApprovalsOff?(.onceOnly)
             return
         }
         guard let decision = AcpmuxMacApprover.shared.decision(instance: context.instance, session: session, permission: permission,
