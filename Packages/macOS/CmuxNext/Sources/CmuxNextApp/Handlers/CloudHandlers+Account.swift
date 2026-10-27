@@ -63,7 +63,7 @@ extension CloudHandlers {
             let availability = CloudWorkspaceSetupWizard.CredentialAvailability.resolve(
                 teamID: cloud.auth.teamID, supportsFileRoute: cloud.configuration.linkSource == .legacy)
             let present: (CmuxDialogSpec) async -> CmuxDialogAnswer = { spec in
-                let scope: CmuxDialogScope = services.windows.active.map { .window($0.window) } ?? .app
+                let scope: CmuxDialogScope = services.windows.active?.window.map(CmuxDialogScope.window) ?? .app
                 return await CmuxDialogCenter.shared.present(spec, in: scope)
             }
             let wizard = CloudWorkspaceSetupWizard()
