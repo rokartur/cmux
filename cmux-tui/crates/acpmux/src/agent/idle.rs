@@ -86,29 +86,36 @@ impl ChildAgent {
                 .unwrap_or(false);
             }
             let mut slot = self.child.lock().await;
-            let Some(child) = slot.as_mut() else { return false };
-            let Some(pid) = child.id() else { return false };
             if generation != self.idle_activity.load(Ordering::SeqCst) || self.idle_has_pending() {
                 return false;
             }
+            let Some(mut child) = slot.take() else { return false };
+            let Some(pid) = child.id() else { return false };
             self.idle_pid_only.store(true, Ordering::SeqCst);
             self.retire();
-            // SAFETY: our held, unreaped child, never a group or a cached PID after reaping.
-            unsafe {
-                libc::kill(pid as i32, libc::SIGTERM);
-            }
-            match tokio::time::timeout(KILL_GRACE, child.wait()).await {
-                Ok(Ok(_)) => {}
-                Ok(Err(_)) => return false,
-                Err(_) => {
-                    let _ = child.start_kill();
-                    if !matches!(tokio::time::timeout(KILL_GRACE, child.wait()).await, Ok(Ok(_))) {
-                        return false;
+            // The owner task survives caller cancellation and holds the child through reap.
+            tokio::spawn(async move {
+                // SAFETY: our held, unreaped child, never a group or a cached PID after reaping.
+                unsafe {
+                    libc::kill(pid as i32, libc::SIGTERM);
+                }
+                match tokio::time::timeout(KILL_GRACE, child.wait()).await {
+                    Ok(Ok(_)) => {}
+                    Ok(Err(_)) => return false,
+                    Err(_) => {
+                        let _ = child.start_kill();
+                        if !matches!(
+                            tokio::time::timeout(KILL_GRACE, child.wait()).await,
+                            Ok(Ok(_))
+                        ) {
+                            return false;
+                        }
                     }
                 }
-            }
-            *slot = None;
-            true
+                true
+            })
+            .await
+            .unwrap_or(false)
         }
     }
 }
