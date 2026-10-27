@@ -1,4 +1,4 @@
-@testable import CmuxNextApp
+import CmuxNextCloudUI
 import CmuxNextCloud
 import Testing
 

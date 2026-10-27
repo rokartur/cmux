@@ -1,28 +1,25 @@
-import AppKit
-import CmuxNextActions
-import CmuxNextCloud
-import CmuxNextCompat
-import CmuxNextDesign
-import CmuxNextDaemon
+public import CmuxNextCloud
+public import CmuxNextDesign
+import Foundation
 
 /// The short, person-started setup behind New Cloud Machine. The existing
 /// creation flow still owns provisioning and opening the first workspace.
 @MainActor
-struct CloudWorkspaceSetupWizard {
-    let context: AppActionContext
+public struct CloudWorkspaceSetupWizard {
+    public init() {}
 
-    nonisolated enum Source: String, Sendable, Equatable {
+    public nonisolated enum Source: String, Sendable, Equatable {
         case empty
         case repository
     }
 
-    nonisolated struct Plan: Sendable, Equatable {
-        var source: Source
-        var repository: CloudMachineRepo?
+    public nonisolated struct Plan: Sendable, Equatable {
+        public var source: Source
+        public var repository: CloudMachineRepo?
 
-        var request: CloudMachineRequest { CloudMachineRequest(repo: repository) }
+        public var request: CloudMachineRequest { CloudMachineRequest(repo: repository) }
 
-        static func make(source: Source, repositoryText: String) throws -> Plan {
+        public static func make(source: Source, repositoryText: String) throws -> Plan {
             switch source {
             case .empty:
                 return Plan(source: .empty, repository: nil)
@@ -32,12 +29,12 @@ struct CloudWorkspaceSetupWizard {
         }
     }
 
-    nonisolated enum CredentialAvailability: Equatable, Sendable {
+    public nonisolated enum CredentialAvailability: Equatable, Sendable {
         case available
         case teamMachine
         case unsupportedCloudRoute
 
-        static func resolve(teamID: String?, supportsFileRoute: Bool) -> CredentialAvailability {
+        public static func resolve(teamID: String?, supportsFileRoute: Bool) -> CredentialAvailability {
             guard teamID == nil else { return .teamMachine }
             return supportsFileRoute ? .available : .unsupportedCloudRoute
         }
@@ -48,46 +45,28 @@ struct CloudWorkspaceSetupWizard {
         static let repository = "repository"
     }
 
-    func begin(window: WindowState?, askedBy: String? = nil) {
-        CloudHandlers.runTracked("new Cloud workspace", context) { [context] in
-            guard let plan = await Self.choosePlan(context: context) else { return }
-            let creation = CloudHandlers.creationFlow(context, startedByPerson: true, askedBy: askedBy)
-                .start(in: window, existing: nil, request: plan.request)
-            guard case .created? = await CloudHandlers.settledCreation(creation, in: context.services.cloud.creations),
-                  let session = creation.session,
-                  await Self.waitUntilReady(creation) else { return }
-            await Self.offerCredentialSetup(for: session, context: context)
-        }
-    }
-
-    private static func choosePlan(context: AppActionContext) async -> Plan? {
-        let cloud = context.services.cloud
-        let supportsFileRoute = cloud.configuration.linkSource == .legacy
-        let availability = CredentialAvailability.resolve(teamID: cloud.auth.teamID, supportsFileRoute: supportsFileRoute)
-        let spec = Self.setupDialogSpec(availability: availability)
-        let answer = await CmuxDialogCenter.shared.present(spec, in: scope(context))
+    public func choosePlan(availability: CredentialAvailability,
+                           present: (CmuxDialogSpec) async -> CmuxDialogAnswer) async throws -> Plan? {
+        let answer = await present(Self.setupDialogSpec(availability: availability))
         guard answer.button == "create", !answer.isDismissal,
               let choice = answer.text(Field.source),
               let source = Source(rawValue: choice) else { return nil }
-        do {
-            if source == .empty { return try Plan.make(source: .empty, repositoryText: "") }
-            return try Plan.make(source: source, repositoryText: answer.text(Field.repository) ?? "")
-        } catch let error as CloudMachineRepo.Invalid {
-            let detail: String
+        do { return try Plan.make(source: source, repositoryText: answer.text(Field.repository) ?? "") }
+        catch let error as CloudMachineRepo.Invalid { throw RepositoryFailure(error: error) }
+    }
+
+    private struct RepositoryFailure: LocalizedError {
+        let error: CloudMachineRepo.Invalid
+        var errorDescription: String? {
             switch error {
-            case .unrecognized: detail = CloudWorkspaceSetupWizardStrings.repositoryInvalid
-            case .credentialsInURL: detail = CloudWorkspaceSetupWizardStrings.repositoryCredentials
-            case .invalidRef: detail = CloudWorkspaceSetupWizardStrings.repositoryRefInvalid
+            case .unrecognized: CloudWorkspaceSetupWizardStrings.repositoryInvalid
+            case .credentialsInURL: CloudWorkspaceSetupWizardStrings.repositoryCredentials
+            case .invalidRef: CloudWorkspaceSetupWizardStrings.repositoryRefInvalid
             }
-            CloudPresenter.failure(ActionFailure(message: detail), in: context.services.windows.active?.window)
-            return nil
-        } catch {
-            CloudPresenter.failure(error, in: context.services.windows.active?.window)
-            return nil
         }
     }
 
-    static func setupDialogSpec(availability: CredentialAvailability = .available,
+    public static func setupDialogSpec(availability: CredentialAvailability = .available,
                                 source: Source = .empty, repository: String = "") -> CmuxDialogSpec {
         CmuxDialogSpec(
             title: CloudWorkspaceSetupWizardStrings.title,
@@ -108,46 +87,18 @@ struct CloudWorkspaceSetupWizard {
             identifier: "cmux.dialog.cloud.workspaceSetup")
     }
 
-    private static func offerCredentialSetup(for session: CloudMachineSession, context: AppActionContext) async {
-        let services = context.services
-        let cloud = context.services.cloud
-        let teamID = cloud.auth.teamID
-        let userID = cloud.auth.user?.id
-        let availability = CredentialAvailability.resolve(
-            teamID: teamID,
-            supportsFileRoute: cloud.configuration.linkSource == .legacy)
-        guard availability == .available, let userID else { return }
+    public enum Provider: Sendable, Equatable { case claude, codex }
 
-        let spec = Self.credentialDialogSpec(machine: session.machine.title,
-                                             account: cloud.auth.activeTeam.team?.displayName ?? CloudWorkspaceSetupWizardStrings.personalAccount)
-        let answer = await CmuxDialogCenter.shared.present(spec, in: scope(context))
+    public func offerCredentialSetup(machine: String, account: String,
+                                     present: (CmuxDialogSpec) async -> CmuxDialogAnswer,
+                                     transfer: (Provider) async throws -> Void) async throws {
+        let answer = await present(Self.credentialDialogSpec(machine: machine, account: account))
         guard answer.button == "transfer", !answer.isDismissal else { return }
-
-        do {
-            if answer.isOn("claude") {
-                let transfer = CloudCredentialTransfer(provider: .claude, machineID: session.machineID, teamID: teamID,
-                                                       userID: userID, openTerminal: { [weak services] line in
-                    services?.inFrontPane { $0.newTerminalTab(typing: line + "\r") } ?? false
-                })
-                try await transfer.run(api: cloud.api, currentTeamID: { cloud.auth.teamID },
-                                       currentUserID: { cloud.auth.user?.id }, confirmed: true)
-            }
-            if answer.isOn("codex") {
-                let transfer = CloudCredentialTransfer(provider: .codex, machineID: session.machineID, teamID: teamID,
-                                                       userID: userID, openTerminal: { [weak services] line in
-                    services?.inFrontPane { $0.newTerminalTab(typing: line + "\r") } ?? false
-                })
-                try await transfer.run(api: cloud.api, currentTeamID: { cloud.auth.teamID },
-                                       currentUserID: { cloud.auth.user?.id }, confirmed: true)
-            }
-        } catch let failure as CloudCredentialTransfer.Failure {
-            CloudPresenter.show(CloudWorkspaceSetupWizardStrings.credentialFailedTitle, CloudWorkspaceSetupWizardStrings.credentialFailure(failure), in: context.services.windows.active?.window)
-        } catch {
-            CloudPresenter.show(CloudWorkspaceSetupWizardStrings.credentialFailedTitle, CloudWorkspaceSetupWizardStrings.credentialFailed, in: context.services.windows.active?.window)
-        }
+        if answer.isOn("claude") { try await transfer(.claude) }
+        if answer.isOn("codex") { try await transfer(.codex) }
     }
 
-    static func credentialDialogSpec(machine: String, account: String) -> CmuxDialogSpec {
+    public static func credentialDialogSpec(machine: String, account: String) -> CmuxDialogSpec {
         CmuxDialogSpec(
             title: CloudWorkspaceSetupWizardStrings.credentialTitle(machine),
             lines: [CloudWorkspaceSetupWizardStrings.credentialDisclosure(machine, account)],
@@ -162,18 +113,6 @@ struct CloudWorkspaceSetupWizard {
             identifier: "cmux.dialog.cloud.workspaceCredentials")
     }
 
-    private static func waitUntilReady(_ creation: CloudMachineCreation) async -> Bool {
-        for await stage in ObservationStream({ creation.stage }) {
-            if stage == .ready { return true }
-            if stage.isFinished { return false }
-        }
-        return false
-    }
-
-    private static func scope(_ context: AppActionContext) -> CmuxDialogScope {
-        if let window = context.services.windows.active?.window { return .window(window) }
-        return .app
-    }
 }
 
 private enum CloudWorkspaceSetupWizardStrings {
@@ -193,9 +132,6 @@ private enum CloudWorkspaceSetupWizardStrings {
     static let setupClaude = String(localized: "cloud.workspaceSetup.setupClaude", defaultValue: "Claude", table: "Cloud", bundle: .module)
     static let setupCodex = String(localized: "cloud.workspaceSetup.setupCodex", defaultValue: "Codex", table: "Cloud", bundle: .module)
     static let transferAndFinish = String(localized: "cloud.workspaceSetup.transferAndFinish", defaultValue: "Transfer and finish", table: "Cloud", bundle: .module)
-    static let credentialFailedTitle = String(localized: "cloud.workspaceSetup.credentialFailedTitle", defaultValue: "Provider setup stopped", table: "Cloud", bundle: .module)
-    static let credentialFailed = String(localized: "cloud.workspaceSetup.credentialFailed", defaultValue: "cmux could not finish setting up the provider. No credential details were shown.", table: "Cloud", bundle: .module)
-    static let personalAccount = String(localized: "cloud.workspaceSetup.personalAccount", defaultValue: "Personal account", table: "Cloud", bundle: .module)
 
     static func credentialsNote(_ availability: CloudWorkspaceSetupWizard.CredentialAvailability) -> String {
         switch availability {
@@ -216,14 +152,4 @@ private enum CloudWorkspaceSetupWizardStrings {
         String(format: String(localized: "cloud.workspaceSetup.credentialDisclosure", defaultValue: "Claude reuses its saved setup token. Codex starts a fresh login for this VM in a visible terminal on this Mac. The selected credential is installed on %@ for %@, replacing that provider's login for future launches. Existing sessions stay unchanged. Select one or both providers, then confirm the transfer.", table: "Cloud", bundle: .module), machine, team)
     }
 
-    static func credentialFailure(_ failure: CloudCredentialTransfer.Failure) -> String {
-        switch failure {
-        case .sharedMachine:
-            String(localized: "cloud.workspaceSetup.sharedMachine", defaultValue: "This VM is shared by a team, so personal provider credentials were not moved.", table: "Cloud", bundle: .module)
-        case .scopeChanged:
-            String(localized: "cloud.workspaceSetup.scopeChanged", defaultValue: "Your cmux account or team changed. Start provider setup again from the same account.", table: "Cloud", bundle: .module)
-        default:
-            credentialFailed
-        }
-    }
 }

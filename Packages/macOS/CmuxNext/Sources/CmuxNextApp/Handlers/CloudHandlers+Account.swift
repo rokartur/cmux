@@ -1,6 +1,9 @@
 import AppKit
 import CmuxNextActions
 import CmuxNextCloud
+import CmuxNextCloudUI
+import CmuxNextCompat
+import CmuxNextDesign
 import CmuxNextControl
 import CmuxNextDaemon
 import CmuxNextSettings
@@ -14,7 +17,7 @@ extension CloudHandlers {
             let request = try newMachineRequest(invocation)
             let window = invocation.allowsViewChange ? context.services.windows.active?.state : nil
             if request.isDefault, origin(of: invocation) == .user, window != nil {
-                CloudWorkspaceSetupWizard(context: context).begin(window: window, askedBy: invocation.callerAgentSession)
+                beginWorkspaceSetup(context, window: window, askedBy: invocation.callerAgentSession)
                 return
             }
             let flow = creationFlow(context, startedByPerson: invocation.origin == .user, askedBy: invocation.callerAgentSession)
@@ -28,7 +31,7 @@ extension CloudHandlers {
             let window = invocation.allowsViewChange ? context.services.windows.active?.state : nil
             guard let session = target, session.daemon.connection != nil else {
                 if target == nil, origin(of: invocation) == .user, window != nil {
-                    CloudWorkspaceSetupWizard(context: context).begin(window: window, askedBy: invocation.callerAgentSession)
+                    beginWorkspaceSetup(context, window: window, askedBy: invocation.callerAgentSession)
                     return
                 }
                 // A new machine, or one still on its way: show its progress
@@ -48,6 +51,40 @@ extension CloudHandlers {
                 guard let id else { throw ActionFailure(message: CloudStrings.notConnected) }
                 show(id, context)
                 return machineFields(session.machineID, ["workspace_id": .string(id)])
+            }
+        }
+    }
+
+    static func beginWorkspaceSetup(_ context: AppActionContext, window: WindowState?, askedBy: String?) {
+        runTracked("new Cloud workspace", context) {
+            let cloud = context.services.cloud, services = context.services
+            let userID = cloud.auth.user?.id, teamID = cloud.auth.teamID
+            let availability = CloudWorkspaceSetupWizard.CredentialAvailability.resolve(
+                teamID: cloud.auth.teamID, supportsFileRoute: cloud.configuration.linkSource == .legacy)
+            let present: (CmuxDialogSpec) async -> CmuxDialogAnswer = { spec in
+                let scope: CmuxDialogScope = services.windows.active.map { .window($0.window) } ?? .app
+                return await CmuxDialogCenter.shared.present(spec, in: scope)
+            }
+            let wizard = CloudWorkspaceSetupWizard()
+            guard let plan = try await wizard.choosePlan(availability: availability, present: present) else { return }
+            var request = plan.request
+            request.script = try await request.loadScript(work: services.work)
+            let creation = creationFlow(context, startedByPerson: true, askedBy: askedBy).start(in: window, existing: nil, request: request)
+            guard case .created? = await settledCreation(creation, in: cloud.creations), let session = creation.session else { return }
+            for await stage in ObservationStream({ creation.stage }) {
+                if stage == .ready { break }
+                if stage.isFinished { return }
+            }
+            guard availability == .available, let userID,
+                  cloud.auth.user?.id == userID, cloud.auth.teamID == teamID else { return }
+            try await wizard.offerCredentialSetup(machine: session.machine.title,
+                account: cloud.auth.activeTeam.team?.displayName ?? String(localized: "cloud.workspaceSetup.personalAccount", defaultValue: "Personal account", table: "Cloud", bundle: .module), present: present) { provider in
+                let transfer = CloudCredentialTransfer(provider: provider == .claude ? .claude : .codex,
+                    machineID: session.machineID, teamID: teamID, userID: userID, openTerminal: { [weak services] line in
+                        services?.inFrontPane { $0.newTerminalTab(typing: line + "\r") } ?? false
+                    })
+                try await transfer.run(api: cloud.api, currentTeamID: { cloud.auth.teamID },
+                                       currentUserID: { cloud.auth.user?.id }, confirmed: true)
             }
         }
     }
