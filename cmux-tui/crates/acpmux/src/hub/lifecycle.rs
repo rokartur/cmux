@@ -1425,6 +1425,9 @@ impl Hub {
             && !self.managed_off_runs_full_access(session)
             && let Some(child) = session.child.lock().await.as_ref()
             && child.is_alive().await
+            // Under MDM's off an agent whose reader stopped is not heard: `ensure_child` ends it
+            // (`host_unheard`, review 68 of #23322).
+            && !(child.is_stopped() && self.full_access_managed_off())
         {
             return Ok(child.clone());
         }
