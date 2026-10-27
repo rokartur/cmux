@@ -770,6 +770,7 @@ impl Hub {
                     // now, never resent unchecked (reviews 82 and 84 of #23322; with MDM unset it
                     // is sent as before).
                     Some(outcome) if work.ancestor_answers.contains(&id.to_string()) => {
+                        pause_replayed_answer("ACPMUX_TEST_PAUSE_RECOVERED_ANSWER").await;
                         let hold = self.family_hold().await;
                         if hold.bound.off {
                             drop(hold);
@@ -783,7 +784,7 @@ impl Hub {
                             );
                             continue;
                         }
-                        pause_replayed_answer().await;
+                        pause_replayed_answer("ACPMUX_TEST_PAUSE_REPLAYED_ANSWER").await;
                         let fence = self.hold_until_written(session, hold);
                         let answer = Ok(permission_answer(outcome));
                         let _ = child.respond_fenced(id.clone(), answer, Some(&fence)).await;
@@ -942,16 +943,18 @@ impl Hub {
 /// the request, and the permission epoch and turn its answer was sent under.
 type ReAsk = (Value, String, Value, Option<(u64, Option<String>)>);
 
-/// Debug builds only: a test pauses a restart's resend of an ancestor's answer 3 s right after
-/// its check, so it can push MDM's off then: the pause writes the file
-/// `ACPMUX_TEST_PAUSE_REPLAYED_ANSWER` names first (`durable_agents.rs`). Release builds have
-/// no seam.
-async fn pause_replayed_answer() {
+/// Debug builds only: a test pauses a restart's resend of an ancestor's answer 3 s, right after
+/// its check (`ACPMUX_TEST_PAUSE_REPLAYED_ANSWER`, so it can push MDM's off then) or before it
+/// (`ACPMUX_TEST_PAUSE_RECOVERED_ANSWER`, so it can stop the session then): the pause writes
+/// the file `var` names first (`durable_agents.rs`). Release builds have no seam.
+async fn pause_replayed_answer(var: &str) {
     #[cfg(debug_assertions)]
-    if let Some(marker) = std::env::var_os("ACPMUX_TEST_PAUSE_REPLAYED_ANSWER") {
+    if let Some(marker) = std::env::var_os(var) {
         let _ = std::fs::write(marker, "");
         tokio::time::sleep(std::time::Duration::from_secs(3)).await;
     }
+    #[cfg(not(debug_assertions))]
+    let _ = var;
 }
 
 /// The `session/request_permission` result for a logged outcome, shaped as

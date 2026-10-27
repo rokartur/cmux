@@ -2334,6 +2334,31 @@ async fn an_off_push_waits_for_an_ancestor_answer_resent_after_a_restart() {
     );
 }
 
+/// Review 88 of #23322: under MDM's off, a restart's undelivered ancestor answer whose prompt a
+/// Stop cancelled while the restart waited for the family gate is not asked again.
+#[tokio::test]
+async fn under_an_mdm_off_a_stop_during_a_restart_cancels_an_undelivered_ancestor_answer() {
+    let (mut daemon, session, permission_id) =
+        an_undelivered_ancestor_answer("ancstop", false).await;
+    std::fs::write(daemon.home.join("start-mode.json"), r#"{"fullAccessManaged":false}"#).unwrap();
+    let paused = daemon.home.join("recovery-paused");
+    let marker = paused.to_string_lossy().into_owned();
+    daemon.env.push(("ACPMUX_TEST_PAUSE_RECOVERED_ANSWER".into(), marker));
+    daemon.start();
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while !paused.exists() {
+        assert!(Instant::now() < deadline, "the restart never reached the answer");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    let stopped = daemon.rpc().await.call("session/cancel", json!({"sessionId": session})).await;
+    assert!(stopped.is_object(), "{stopped}");
+    tokio::time::sleep(Duration::from_secs(5)).await;
+    let asked_again = daemon.events(&session).iter().any(|e| {
+        e["kind"] == "permission_reissued" && e["msg"]["permissionId"] == json!(permission_id)
+    });
+    assert!(!asked_again, "a prompt a Stop cancelled during the restart was asked again");
+}
+
 /// With MDM unset, nothing changes: the logged answer reaches the adopted agent.
 #[tokio::test]
 async fn with_mdm_unset_an_undelivered_ancestor_answer_is_sent_after_a_restart() {
