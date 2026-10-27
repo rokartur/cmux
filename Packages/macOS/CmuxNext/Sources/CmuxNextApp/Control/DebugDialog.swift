@@ -13,7 +13,7 @@ import CmuxNextSettings
 /// same center path a click takes.
 /// - `{}` lists the open dialogs (id, title, lines, origin, scope, visible,
 ///   buttons, field values, frame in window coordinates).
-/// - `{open: "confirm" | "text" | "credentials" | "save" | "choice" | "sessionMove" | "sessionMoveEnd" | "cloudWorkspaceEmpty" | "cloudWorkspaceRepository" | "cloudWorkspaceTeam" | "cloudCredentials",
+/// - `{open: "confirm" | "text" | "credentials" | "save" | "choice" | "sessionMove" | "sessionMoveEnd" | "cloudWorkspaceEmpty" | "cloudWorkspaceRepository" | "cloudWorkspaceTeam" | "cloudWorkspaceCompact" | "cloudWorkspaceActions" | "cloudCredentials",
 ///   scope: "window" | "app", origin?}`
 ///   shows a fixture (screenshots, latency) and returns its id.
 /// - `{id?, set: {field: string | bool}}`, `{id?, key: "return" | "escape" | "tab" | "shift-tab" | "cmd-<c>"}`,
@@ -140,6 +140,32 @@ enum DebugDialog {
             "cloudWorkspaceEmpty": CloudWorkspaceSetupWizard.setupDialogSpec(source: .empty),
             "cloudWorkspaceRepository": CloudWorkspaceSetupWizard.setupDialogSpec(source: .repository, repository: "octo/paint"),
             "cloudWorkspaceTeam": CloudWorkspaceSetupWizard.setupDialogSpec(availability: .teamMachine, source: .empty),
+            // Gallery-only alternatives: compare the selected labeled form with a compact choice
+            // and with explicit source actions. These fixtures never ship or change production flow.
+            "cloudWorkspaceCompact": CmuxDialogSpec(
+                title: "New Cloud Workspace",
+                lines: ["Choose a starting point. A repository is cloned into ~/work on the new VM."],
+                fields: [
+                    .choice(id: "source", label: nil,
+                            options: [CmuxDialogOption(label: "Empty VM — start a new project", value: "empty"),
+                                      CmuxDialogOption(label: "From repository", value: "repository")],
+                            selected: "empty"),
+                    .text("repository", initial: "octo/paint", label: nil,
+                          placeholder: "owner/repository or GitHub URL"),
+                ],
+                buttons: [.cancel(), CmuxDialogButton(id: "create", title: "Create workspace", role: .default)],
+                identifier: "cmux.dialog.cloud.workspaceCompact"),
+            "cloudWorkspaceActions": CmuxDialogSpec(
+                title: "New Cloud Workspace",
+                lines: ["Choose a starting point. A repository is cloned into ~/work on the new VM."],
+                fields: [.text("repository", initial: "octo/paint", label: "GitHub repository",
+                               placeholder: "owner/repository or GitHub URL")],
+                buttons: [
+                    .cancel(),
+                    CmuxDialogButton(id: "empty", title: "Empty VM", role: .normal),
+                    CmuxDialogButton(id: "repository", title: "From repository", role: .normal),
+                ],
+                identifier: "cmux.dialog.cloud.workspaceActions"),
             "cloudCredentials": CloudWorkspaceSetupWizard.credentialDialogSpec(machine: "paint", account: "Personal account"),
             // Move Sessions from Another cmux Build (session.moveFromBuild), with no other build running.
             "sessionMove": SessionMoveSelection(peers: [moveFixturePeer]).dialog,
