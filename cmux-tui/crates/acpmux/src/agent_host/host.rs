@@ -1009,12 +1009,16 @@ impl State {
                     let _ = c.tx.send(HostFrame::TerminateAck);
                 }
             }
-            ControllerFrame::Hibernate { id, generation, grace_ms } => {
+            ControllerFrame::Hibernate { id, generation, grace_ms, expires_ms } => {
                 let mut accepted = false;
-                if self.idle_generation().await == Some(generation) {
+                if crate::store::now_ms() < expires_ms
+                    && self.idle_generation().await == Some(generation)
+                {
                     let (tx, rx) = tokio::sync::oneshot::channel();
-                    let expires =
-                        tokio::time::Instant::now() + std::time::Duration::from_millis(100);
+                    let expires = tokio::time::Instant::now()
+                        + std::time::Duration::from_millis(
+                            100.min(expires_ms.saturating_sub(crate::store::now_ms())),
+                        );
                     let request = super::hibernate::Request {
                         generation,
                         expires,
@@ -1034,6 +1038,7 @@ impl State {
                         modes: None,
                         config_options: None,
                         idle_generation: accepted.then_some(generation),
+                        idle_retiring: self.idle_pid_only.load(std::sync::atomic::Ordering::SeqCst),
                     });
                 }
             }
@@ -1054,6 +1059,7 @@ impl State {
                         modes,
                         config_options,
                         idle_generation,
+                        idle_retiring: self.idle_pid_only.load(std::sync::atomic::Ordering::SeqCst),
                     });
                 }
             }

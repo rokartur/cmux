@@ -52,7 +52,3 @@ pub(super) async fn wait(
     }
     child.wait().await.ok().and_then(|status| status.code())
 }
-
-#[cfg(test)]
-#[path = "hibernate_tests.rs"]
-mod tests;

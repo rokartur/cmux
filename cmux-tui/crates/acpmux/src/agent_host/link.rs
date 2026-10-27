@@ -149,6 +149,7 @@ pub struct QueryReply {
     pub modes: Option<Value>,
     pub config_options: Option<Value>,
     pub idle_generation: Option<u64>,
+    pub idle_retiring: bool,
 }
 
 type Queries = Arc<std::sync::Mutex<std::collections::HashMap<u64, oneshot::Sender<QueryReply>>>>;
@@ -422,6 +423,7 @@ async fn connect_inner_max(record: HostRecord, resume_after: u64, max: u16) -> R
                         modes,
                         config_options,
                         idle_generation,
+                        idle_retiring,
                     })) => {
                         if let Some(reply) = queries.lock_or_recover().remove(&id) {
                             let _ = reply.send(QueryReply {
@@ -429,6 +431,7 @@ async fn connect_inner_max(record: HostRecord, resume_after: u64, max: u16) -> R
                                 modes,
                                 config_options,
                                 idle_generation,
+                                idle_retiring,
                             });
                         }
                     }
@@ -547,18 +550,30 @@ impl Link {
 
     /// Supported only after a query returned an idle watermark; old hosts never receive it.
     pub async fn hibernate(&self, generation: u64, grace: std::time::Duration) -> Result<bool> {
+        self.hibernate_within(generation, grace, QUERY_BUDGET).await
+    }
+
+    pub async fn hibernate_within(
+        &self,
+        generation: u64,
+        grace: std::time::Duration,
+        budget: std::time::Duration,
+    ) -> Result<bool> {
+        let expires_ms = crate::store::now_ms().saturating_add(budget.as_millis() as u64);
         let id = self.next_query.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         let (tx, rx) = oneshot::channel();
         self.queries.lock_or_recover().insert(id, tx);
         let _slot = QuerySlot { queries: self.queries.clone(), id };
-        let result = within("hibernate", QUERY_BUDGET, async {
+        let result = within("hibernate", budget, async {
             self.send(ControllerFrame::Hibernate {
                 id,
                 generation,
                 grace_ms: grace.as_millis() as u64,
+                expires_ms,
             })
             .await?;
-            Ok::<_, anyhow::Error>(rx.await?.idle_generation == Some(generation))
+            let reply = rx.await?;
+            Ok::<_, anyhow::Error>(reply.idle_retiring || reply.idle_generation == Some(generation))
         })
         .await;
         result?

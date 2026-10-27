@@ -24,6 +24,35 @@ impl ChildAgent {
         }
     }
 
+    /// Called under the session spawn lease before a wake reuses a live process.
+    pub(crate) async fn reconcile_idle(&self) -> Result<(), RpcError> {
+        #[cfg(unix)]
+        if self.idle_uncertain.load(Ordering::SeqCst)
+            && let Some(hosted) = &self.hosted
+        {
+            if hosted.exit_seen.load(Ordering::SeqCst) {
+                self.retire();
+                self.idle_uncertain.store(false, Ordering::SeqCst);
+                return Ok(());
+            }
+            // Query is ordered behind any delayed Hibernate. Its sender expiry was fixed
+            // before enqueue, so an older frame cannot commit after this rejection proof.
+            let reply =
+                hosted.link().query().await.map_err(|e| RpcError::internal(e.to_string()))?;
+            if reply.idle_retiring {
+                let exited = hosted.exit.notified();
+                if !hosted.exited.load(Ordering::SeqCst) {
+                    tokio::time::timeout(std::time::Duration::from_secs(5), exited)
+                        .await
+                        .map_err(|_| RpcError::internal("agent is still hibernating"))?;
+                }
+                self.retire();
+            }
+            self.idle_uncertain.store(false, Ordering::SeqCst);
+        }
+        Ok(())
+    }
+
     /// True only after the exact held child exited. Lost/old hosts are retained.
     pub(crate) async fn hibernate(&self, generation: u64) -> bool {
         #[cfg(windows)]
@@ -34,8 +63,16 @@ impl ChildAgent {
         #[cfg(unix)]
         {
             if let Some(hosted) = &self.hosted {
-                if !hosted.link().hibernate(generation, KILL_GRACE).await.unwrap_or(false) {
-                    return false;
+                // Cancellation or timeout leaves this flag set until a later ordered Query
+                // proves rejection or terminal exit. A wake may not reuse an uncertain child.
+                self.idle_uncertain.store(true, Ordering::SeqCst);
+                match hosted.link().hibernate(generation, KILL_GRACE).await {
+                    Ok(false) => {
+                        self.idle_uncertain.store(false, Ordering::SeqCst);
+                        return false;
+                    }
+                    Err(_) => return false,
+                    Ok(true) => {}
                 }
                 let exited = hosted.exit.notified();
                 return tokio::time::timeout(std::time::Duration::from_secs(5), async {

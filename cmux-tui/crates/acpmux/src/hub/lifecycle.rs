@@ -534,16 +534,17 @@ impl Hub {
             return Err(super::start_mode::full_access_off());
         }
         let live = session.child.lock().await.clone();
-        if let Some(child) = live
-            && child.is_alive().await
-        {
-            // A closed session with a live agent: a host the daemon adopted at its start that
-            // outlived the stop. It reopens for this request, ready.
-            if session.status() == SessionStatus::Closed {
-                self.reopen_to_start(session, stops)?;
-                self.set_status(session, SessionStatus::Ready);
+        if let Some(child) = live {
+            child.reconcile_idle().await?;
+            if child.is_alive().await && !child.is_retired() {
+                // A closed session with a live agent: a host the daemon adopted at its start that
+                // outlived the stop. It reopens for this request, ready.
+                if session.status() == SessionStatus::Closed {
+                    self.reopen_to_start(session, stops)?;
+                    self.set_status(session, SessionStatus::Ready);
+                }
+                return Ok(child);
             }
-            return Ok(child);
         }
         // A running agent host for this session is reached again, never
         // started or initialized a second time.

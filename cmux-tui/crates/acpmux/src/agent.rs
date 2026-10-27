@@ -516,6 +516,8 @@ pub struct ChildAgent {
     pub(crate) idle_use: tokio::sync::RwLock<()>,
     #[cfg(unix)]
     idle_pid_only: std::sync::atomic::AtomicBool,
+    #[cfg(unix)]
+    idle_uncertain: std::sync::atomic::AtomicBool,
     idle_activity: AtomicU64,
     /// The question preview format its command was pinned to, for a direct
     /// start (a host's is recorded where the host starts, `hub/hosts.rs`).
@@ -637,6 +639,8 @@ impl ChildAgent {
             idle_use: tokio::sync::RwLock::new(()),
             #[cfg(unix)]
             idle_pid_only: std::sync::atomic::AtomicBool::new(false),
+            #[cfg(unix)]
+            idle_uncertain: std::sync::atomic::AtomicBool::new(false),
             idle_activity: AtomicU64::new(0),
             generation: NEXT_GENERATION.fetch_add(1, Ordering::Relaxed),
             preview_format,
@@ -1539,6 +1543,8 @@ impl ChildAgent {
             idle_use: tokio::sync::RwLock::new(()),
             #[cfg(unix)]
             idle_pid_only: std::sync::atomic::AtomicBool::new(false),
+            #[cfg(unix)]
+            idle_uncertain: std::sync::atomic::AtomicBool::new(false),
             idle_activity: AtomicU64::new(0),
             generation: NEXT_GENERATION.fetch_add(1, Ordering::Relaxed),
             preview_format: None,

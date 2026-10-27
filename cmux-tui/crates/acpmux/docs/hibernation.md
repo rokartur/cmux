@@ -4,50 +4,39 @@ Leo, verbatim:
 
 > An idle Claude/Codex session (no turn running, nothing queued) hibernates after 2 minutes. Its process and its MCP sidecars exit, its state is checkpointed, and it wakes on the next prompt or click within about 1 s. Sessions waiting on a person stay cheap too: they keep only the question.
 
-This foundation supplies safe process retirement. The independent scheduling/app
-change sets the two-minute default, pressure thresholds, click wake and combined
-loading state. Session records and harness conversation IDs survive retirement;
-the existing send path records a prompt, resumes/loads the conversation and
-replays configuration before delivering it. Resume time depends on the harness;
-the one-second target requires measurement and is not a guaranteed deadline.
+This foundation supplies safe retirement; the independent scheduling/app change
+sets two-minute defaults, pressure policy, click wake and combined loading. The
+session record and conversation ID survive. Send resumes/loads and replays config
+before delivery. One-second wake remains a measurement target, not a guarantee.
 
-Retirement signals only a held harness child: TERM, up to 300 ms grace, then KILL
-that same unreaped child if needed. It never signals a process group, enumerates
-processes or kills descendants. Both leader-exit watchers skip group cleanup for
-this path. Explicit Stop retains its separate cleanup behavior.
+Retirement sends TERM, then KILL after 300 ms only to the same held, unreaped
+harness child. It never scans, signals a group or kills descendants. Both exit
+watchers spare the group; explicit Stop keeps its separate cleanup. Detached work
+that escaped, including setsid servers, is out of scope and receives no signal.
 
-Detached work that escaped (including setsid servers) is out of scope by design.
-It survives because retirement never signals it. Reported background tasks and
-subagents veto retirement. A running turn, queued prompt, pending permission or
-secret question, and an in-flight request also keep the harness awake. Keeping
-only a person's question requires a separate resumable permission protocol; this
-foundation preserves existing pending requests.
+Running turns, queues, permissions/secret questions, in-flight requests, reported
+background tasks/subagents veto retirement. Older/unknown hosts, opaque harnesses,
+lost links and Windows jobs stay awake. Session leases and activity generations
+fence wake/spawn against retirement. A holder capability reports its generation;
+the child owner rechecks before signaling. An uncertain timeout requires an ordered
+holder query or terminal exit before reuse. Only the held child owner can signal.
 
-The daemon has harness launch specifications, not handles for MCP servers the
-harness launches. Those servers observe their stdio connection closing; the cmux
-MCP broker owns its upstream Child handles and drops them on EOF. This foundation
-signals no guessed sidecar PID and promises no bounded exit for an opaque third
-party MCP. Sidecar exit must be included in the real-harness RSS measurement.
-
-Host QueryReply optionally advertises an idle activity generation only when its
-Claude/Codex translator can report background work. An absent capability, unknown
-harness, Windows job, lost link or older host keeps the session awake. Session
-turn/request/spawn leases stay held until terminal exit. Activity generations are
-checked immediately before signaling; a new request waits and resumes afterward.
-The host child owner also fences the requested generation and rejects an expired
-retirement. Once committed, the host accepts no new harness lines.
+MCP launch specs are not handles. Harness-launched servers observe stdio EOF;
+the cmux MCP broker drops its owned upstream Child handles on EOF. No sidecar PID
+is guessed, and opaque third-party MCP exit is not bounded by this foundation.
+Real-harness RSS measurement must account for any remaining sidecars. Keeping only
+a person's question requires a separate resumable permission protocol.
 
 Timers and cleanup:
 
-- The existing single hub idle task ends when the hub drops or shutdown wakes
-  it; no new polling task. Ineligible candidates restart their idle deadline.
-- Each host query/retirement exchange includes queue insertion and reply under
-  its bounded query budget; answer, timeout and cancellation remove its reply entry.
-- A host retirement request expires after 100 ms if its child owner cannot
-  commit it. Its acknowledgement has a 500 ms bound; the channel closes on host
-  exit. No request can signal after expiration.
-- The child owner cancels its 300 ms grace timer when exit wins and reaps before
-  releasing its handle. No delayed KILL uses a reaped PID. The existing two-second
-  pipe drain bounds completion if surviving work retains stdout/stderr.
-- The controller's terminal-exit wait ends on the exit notification or after
-  five seconds; timeout never falls back to a group/tree kill.
+- The existing single hub idle task ends when shutdown wakes it or the hub drops.
+- Query/retirement enqueue and reply share a five-second budget; a guard removes
+  pending replies on answer, timeout and caller cancellation.
+- Retirement expiry is fixed before enqueue. The child owner has at most 100 ms
+  of that remaining budget to commit; expired frames never signal after a wake.
+  The 500 ms acknowledgement bound does not authorize reuse after uncertainty.
+- Exit cancels the child owner's 300 ms grace timer; it reaps before releasing the
+  handle, preventing a delayed KILL of a reused PID. Host shutdown lets grace finish.
+- The existing two-second pipe drain bounds output held by surviving work. The
+  controller waits for terminal exit for at most five seconds; timeout never falls
+  back to group/tree killing and must be reconciled before the child is reused.

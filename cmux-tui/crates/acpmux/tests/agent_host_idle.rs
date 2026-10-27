@@ -50,8 +50,21 @@ async fn idle_pid_only_host_query_fences_activity_and_preserves_children() {
     request(&owner, 2, "session/new", json!({"cwd":dir,"mcpServers":[]})).await;
     read_until(&owner, &mut h, |e| is_response(e, 2)).await;
     assert!(!owner.hibernate(stale, Duration::from_millis(20)).await.unwrap());
+    // A frame queued while the exact owned host is stopped must expire before it wakes.
+    let generation = owner.query().await.unwrap().idle_generation.unwrap();
+    assert_eq!(unsafe { libc::kill(record.host_pid as i32, libc::SIGSTOP) }, 0);
+    let delayed = owner
+        .hibernate_within(generation, Duration::from_millis(20), Duration::from_millis(30))
+        .await;
+    assert_eq!(unsafe { libc::kill(record.host_pid as i32, libc::SIGCONT) }, 0);
+    assert!(delayed.is_err());
+    let reconciled = owner.query().await.unwrap();
+    assert!(!reconciled.idle_retiring, "timed-out retirement executed after wake");
+    request(&owner, 3, "session/set_mode", json!({"sessionId":"idle","modeId":"plan"})).await;
+    read_until(&owner, &mut h, |e| is_response(e, 3)).await;
     let current = owner.query().await.unwrap().idle_generation.unwrap();
     assert!(owner.hibernate(current, Duration::from_millis(200)).await.unwrap());
+    assert!(owner.query().await.unwrap().idle_retiring);
     // A host signal during grace must not cancel its owner before the exact-child KILL.
     assert_eq!(unsafe { libc::kill(record.host_pid as i32, libc::SIGTERM) }, 0);
     read_until(&owner, &mut h, |e| matches!(e, Entry::Exit { .. })).await;
