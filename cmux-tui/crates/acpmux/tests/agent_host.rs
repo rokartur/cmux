@@ -623,38 +623,48 @@ async fn a_fenced_answer_settles_once_its_host_is_killed() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// Review 87 of #23322, round 4: an error answer to a fenced request on a host that gives no
-/// receipt (one a translator makes up once its harness's output ended, as the Codex bridge
-/// does) proves nothing of its line, which stays unsettled while its host lives.
+/// Review 87 of #23322, rounds 4 and 5: no answer to a fenced request on a host that gives no
+/// receipt proves its line was written: an error a translator makes up once its harness's
+/// output ended (the Codex bridge), nor a result it makes up for a prompt it gave up on
+/// (Claude's `cancelled`). The line stays unsettled while its host lives.
 #[tokio::test]
-async fn an_error_answer_does_not_settle_a_request_its_host_still_writes() {
-    let dir = scratch("fenced-error");
-    let made_up = json!({"jsonrpc": "2.0", "id": 1,
+async fn an_answer_does_not_settle_a_request_its_host_still_writes() {
+    let dir = scratch("fenced-answered");
+    let error = json!({"jsonrpc": "2.0", "id": 1,
         "error": {"code": -32603, "message": "codex app-server stopped: it exited"}});
+    let result = json!({"jsonrpc": "2.0", "id": 2, "result": {"stopReason": "cancelled"}});
     let harness = dir.join("agent");
-    write_executable(&harness, &format!("#!/bin/sh\nsleep 1\necho '{made_up}'\nexec sleep 60\n"));
-    let mut launch = spec(&dir, "s-fenced-error");
+    let script = format!("#!/bin/sh\nsleep 1\necho '{error}'\necho '{result}'\nexec sleep 60\n");
+    write_executable(&harness, &script);
+    let mut launch = spec(&dir, "s-fenced-answered");
     launch.program = harness.to_string_lossy().into_owned();
     launch.args.clear();
     let record = link::spawn(&launcher(), &launch).await.unwrap();
     let lock = live_lock(&dir, &record);
     // Before host protocol 2 every host gives no receipt.
     let agent = hosted_agent(&record, true).await;
-    let fence = acpmux::agent::Fence::default();
-    let params = json!({"text": "x".repeat(1 << 20)});
-    let answered = tokio::time::timeout(
-        Duration::from_secs(10),
-        agent.request_with_hook("note", params, Some(&fence), || {}),
-    )
-    .await
-    .expect("the made-up answer comes");
-    let settled = fence.is_settled();
+    let (first, second) = (acpmux::agent::Fence::default(), acpmux::agent::Fence::default());
+    // The first, 1 MiB, fills the harness's stdin, which it never reads; the second waits behind.
+    let big = json!({"text": "x".repeat(1 << 20)});
+    let one = agent.request_with_hook("note", big, Some(&first), || {});
+    let two = async {
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        agent.request_with_hook("note", json!({}), Some(&second), || {}).await
+    };
+    let answered =
+        tokio::time::timeout(Duration::from_secs(10), async { tokio::join!(one, two) }).await;
+    let settled = (first.is_settled(), second.is_settled());
     // SAFETY: the host this test spawned; its live lock is held, so the pid is its own.
     unsafe { libc::kill(record.host_pid as i32, libc::SIGKILL) };
     wait_dead(lock).await;
     let _ = std::fs::remove_dir_all(&dir);
-    assert!(answered.is_err(), "{answered:?}");
-    assert!(!settled, "an error answer counted a line its host still writes as written");
+    let (one, two) = answered.expect("both made-up answers come");
+    assert!(one.is_err() && two.is_ok(), "{one:?} {two:?}");
+    assert_eq!(
+        settled,
+        (false, false),
+        "an answer counted a line its host still writes as written"
+    );
 }
 
 /// Review 87 of #23322, round 3: a harness that exits while a descendant keeps its stdin leaves
