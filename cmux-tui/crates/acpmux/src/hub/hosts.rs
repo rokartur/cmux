@@ -1172,8 +1172,10 @@ impl Hub {
             started["remoteEnvPolicy"] = crate::agent::REMOTE_ENV_POLICY_ID.into();
         }
         self.append(session, "mux", "host_started", started);
-        // A new host: no end is pending for it (`full_access_bound.rs`).
+        // A new host: no end is pending for it, and none of its reports waits
+        // (`full_access_bound.rs`).
         session.floor.full_access_end_pending.store(false, Ordering::SeqCst);
+        session.floor.unapplied_full_access.store(0, Ordering::SeqCst);
         let attached = ChildAgent::attach_hosted(
             &meta.harness,
             record.clone(),
