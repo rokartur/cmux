@@ -165,7 +165,7 @@ pub const FENCE_CUT: &str =
     "an MDM push turned full access off before this message reached the agent, so it was not sent";
 
 /// One message's way to its agent: queued, being written, written (its agent's own stdin has
-/// it: for a hosted agent, once its request is answered, as its host says nothing sooner), cut
+/// it: for a hosted agent, once its host wrote it to the harness, `WRITTEN_METHOD`), cut
 /// while queued (never written after), or failed (its transport closed). A family message or
 /// answer is held to it (`hub/full_access_bound.rs` `hold_until_written`).
 #[derive(Clone)]
@@ -1232,7 +1232,7 @@ impl ChildAgent {
             // and what a translator makes up once its harness's output ended (the Codex bridge),
             // are errors too (review 87). A direct agent's own writer, and a later host's
             // receipt, say when it is written.
-            if self.hosted.is_some()
+            if self.hosted.as_ref().is_some_and(|h| !h.link().receipted)
                 && matches!(&answer, Ok(Ok(_)))
                 && let Some(f) = fence
             {
