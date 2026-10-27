@@ -116,24 +116,24 @@ public struct CloudWorkspaceSetupWizard {
 }
 
 private enum CloudWorkspaceSetupWizardStrings {
-    static let title = String(localized: "cloud.workspaceSetup.title", defaultValue: "New Cloud Workspace", table: "Cloud", bundle: .module)
-    static let setupSummary = String(localized: "cloud.workspaceSetup.summary", defaultValue: "Choose a starting point. A repository is cloned into ~/work on the new VM; no credential is stored in the repository URL.", table: "Cloud", bundle: .module)
-    static let sourceLabel = String(localized: "cloud.workspaceSetup.sourceLabel", defaultValue: "Start with", table: "Cloud", bundle: .module)
-    static let emptyChoice = String(localized: "cloud.workspaceSetup.emptyChoice", defaultValue: "Empty VM — start a new project", table: "Cloud", bundle: .module)
-    static let repositoryChoice = String(localized: "cloud.workspaceSetup.repositoryChoice", defaultValue: "From repository", table: "Cloud", bundle: .module)
-    static let repositoryLabel = String(localized: "cloud.workspaceSetup.repositoryLabel", defaultValue: "GitHub repository (only for From repository)", table: "Cloud", bundle: .module)
-    static let repositoryPlaceholder = String(localized: "cloud.workspaceSetup.repositoryPlaceholder", defaultValue: "owner/repository or GitHub URL", table: "Cloud", bundle: .module)
-    static let create = String(localized: "cloud.workspaceSetup.create", defaultValue: "Create workspace", table: "Cloud", bundle: .module)
-    static let cancel = String(localized: "cloud.workspaceSetup.cancel", defaultValue: "Cancel", table: "Cloud", bundle: .module)
-    static let repositoryInvalid = String(localized: "cloud.workspaceSetup.repositoryInvalid", defaultValue: "Enter a GitHub repository as owner/name or a GitHub URL.", table: "Cloud", bundle: .module)
-    static let repositoryCredentials = String(localized: "cloud.workspaceSetup.repositoryCredentials", defaultValue: "Remove the username or password from the repository URL. cmux never saves URL credentials on the VM.", table: "Cloud", bundle: .module)
-    static let repositoryRefInvalid = String(localized: "cloud.workspaceSetup.repositoryRefInvalid", defaultValue: "The branch, tag, or commit name is not supported.", table: "Cloud", bundle: .module)
-    static let skip = String(localized: "cloud.workspaceSetup.skip", defaultValue: "Skip", table: "Cloud", bundle: .module)
-    static let setupClaude = String(localized: "cloud.workspaceSetup.setupClaude", defaultValue: "Claude", table: "Cloud", bundle: .module)
-    static let setupCodex = String(localized: "cloud.workspaceSetup.setupCodex", defaultValue: "Codex", table: "Cloud", bundle: .module)
-    static let transferAndFinish = String(localized: "cloud.workspaceSetup.transferAndFinish", defaultValue: "Transfer and finish", table: "Cloud", bundle: .module)
+    nonisolated static let title = String(localized: "cloud.workspaceSetup.title", defaultValue: "New Cloud Workspace", table: "Cloud", bundle: .module)
+    nonisolated static let setupSummary = String(localized: "cloud.workspaceSetup.summary", defaultValue: "Choose a starting point. A repository is cloned into ~/work on the new VM; no credential is stored in the repository URL.", table: "Cloud", bundle: .module)
+    nonisolated static let sourceLabel = String(localized: "cloud.workspaceSetup.sourceLabel", defaultValue: "Start with", table: "Cloud", bundle: .module)
+    nonisolated static let emptyChoice = String(localized: "cloud.workspaceSetup.emptyChoice", defaultValue: "Empty VM — start a new project", table: "Cloud", bundle: .module)
+    nonisolated static let repositoryChoice = String(localized: "cloud.workspaceSetup.repositoryChoice", defaultValue: "From repository", table: "Cloud", bundle: .module)
+    nonisolated static let repositoryLabel = String(localized: "cloud.workspaceSetup.repositoryLabel", defaultValue: "GitHub repository (only for From repository)", table: "Cloud", bundle: .module)
+    nonisolated static let repositoryPlaceholder = String(localized: "cloud.workspaceSetup.repositoryPlaceholder", defaultValue: "owner/repository or GitHub URL", table: "Cloud", bundle: .module)
+    nonisolated static let create = String(localized: "cloud.workspaceSetup.create", defaultValue: "Create workspace", table: "Cloud", bundle: .module)
+    nonisolated static let cancel = String(localized: "cloud.workspaceSetup.cancel", defaultValue: "Cancel", table: "Cloud", bundle: .module)
+    nonisolated static let repositoryInvalid = String(localized: "cloud.workspaceSetup.repositoryInvalid", defaultValue: "Enter a GitHub repository as owner/name or a GitHub URL.", table: "Cloud", bundle: .module)
+    nonisolated static let repositoryCredentials = String(localized: "cloud.workspaceSetup.repositoryCredentials", defaultValue: "Remove the username or password from the repository URL. cmux never saves URL credentials on the VM.", table: "Cloud", bundle: .module)
+    nonisolated static let repositoryRefInvalid = String(localized: "cloud.workspaceSetup.repositoryRefInvalid", defaultValue: "The branch, tag, or commit name is not supported.", table: "Cloud", bundle: .module)
+    nonisolated static let skip = String(localized: "cloud.workspaceSetup.skip", defaultValue: "Skip", table: "Cloud", bundle: .module)
+    nonisolated static let setupClaude = String(localized: "cloud.workspaceSetup.setupClaude", defaultValue: "Claude", table: "Cloud", bundle: .module)
+    nonisolated static let setupCodex = String(localized: "cloud.workspaceSetup.setupCodex", defaultValue: "Codex", table: "Cloud", bundle: .module)
+    nonisolated static let transferAndFinish = String(localized: "cloud.workspaceSetup.transferAndFinish", defaultValue: "Transfer and finish", table: "Cloud", bundle: .module)
 
-    static func credentialsNote(_ availability: CloudWorkspaceSetupWizard.CredentialAvailability) -> String {
+    nonisolated static func credentialsNote(_ availability: CloudWorkspaceSetupWizard.CredentialAvailability) -> String {
         switch availability {
         case .available:
             String(localized: "cloud.workspaceSetup.credentialsAvailable", defaultValue: "Optional Claude or Codex setup happens after the VM starts and requires a separate confirmation.", table: "Cloud", bundle: .module)
@@ -144,11 +144,11 @@ private enum CloudWorkspaceSetupWizardStrings {
         }
     }
 
-    static func credentialTitle(_ machine: String) -> String {
+    nonisolated static func credentialTitle(_ machine: String) -> String {
         String(format: String(localized: "cloud.workspaceSetup.credentialTitle", defaultValue: "Set up an AI provider on %@?", table: "Cloud", bundle: .module), machine)
     }
 
-    static func credentialDisclosure(_ machine: String, _ team: String) -> String {
+    nonisolated static func credentialDisclosure(_ machine: String, _ team: String) -> String {
         String(format: String(localized: "cloud.workspaceSetup.credentialDisclosure", defaultValue: "Claude reuses its saved setup token. Codex starts a fresh login for this VM in a visible terminal on this Mac. The selected credential is installed on %@ for %@, replacing that provider's login for future launches. Existing sessions stay unchanged. Select one or both providers, then confirm the transfer.", table: "Cloud", bundle: .module), machine, team)
     }
 
