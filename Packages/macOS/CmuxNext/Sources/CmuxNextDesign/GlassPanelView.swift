@@ -350,7 +350,7 @@ enum ActiveLookScope {
     private static func decide(_ window: NSWindow, answer: Bool) -> Bool {
         if let materialSite {
             // Calibrated: only an inactive answer in an active-look window can change.
-            guard !answer, keepsActiveLook(window) else { return answer }
+            guard !answer, keepsActiveLook(window), plainDepth == 0 else { return answer }
             return reader(depth: forcingDepth) == materialSite
         }
         // Calibrating: only reads inside a glass update for this window count.
@@ -378,10 +378,44 @@ enum ActiveLookScope {
     }
 
     nonisolated(unsafe) private static var keepsActiveLookKey: UInt8 = 0
+    static var plainDepth = 0
+    static var hooked = false
+    /// Experiment: plain NSGlassEffectView updates (and its hosting view's) never force.
+    static func hookPlain() {
+        guard !hooked, #available(macOS 26.0, *) else { return }
+        hooked = true
+        let probe = NSGlassEffectView()
+        var classes: [AnyClass] = [NSGlassEffectView.self]
+        for v in probe.subviews where NSStringFromClass(type(of: v)).contains("HostingView") { classes.append(type(of: v)) }
+        for c in classes {
+            for name in ["layout", "updateConstraints", "viewWillDraw", "viewDidChangeEffectiveAppearance", "_windowChangedKeyState", "viewDidMoveToWindow"] {
+                let sel = NSSelectorFromString(name)
+                guard let m = class_getInstanceMethod(c, sel) else { continue }
+                typealias M = @convention(c) (NSView, Selector) -> Void
+                let prev = unsafeBitCast(method_getImplementation(m), to: M.self)
+                let blk: @convention(block) (NSView) -> Void = { v in
+                    let plain = pthread_main_np() != 0 && isPlain(v)
+                    if plain { MainActor.assumeIsolated { plainDepth += 1 } }
+                    prev(v, sel)
+                    if plain { MainActor.assumeIsolated { plainDepth -= 1 } }
+                }
+                class_replaceMethod(c, sel, imp_implementationWithBlock(blk), method_getTypeEncoding(m))
+            }
+        }
+    }
+    nonisolated static func isPlain(_ v: NSView) -> Bool {
+        MainActor.assumeIsolated {
+            guard #available(macOS 26.0, *) else { return false }
+            var cur: NSView? = v
+            while let c = cur { if let g = c as? NSGlassEffectView { return !(g is ActiveLookGlassEffectView) }; cur = c.superview }
+            return false
+        }
+    }
 
     /// Marks `window` as holding an ``ActiveLookGlassEffectView``: the material read of every glass
     /// graph in it answers active from then on.
     static func keepActiveLook(in window: NSWindow) {
+        hookPlain()
         objc_setAssociatedObject(window, &keepsActiveLookKey, true, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
     }
 
