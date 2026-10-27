@@ -1,5 +1,6 @@
 import CmuxNextCloudUI
 import CmuxNextCloud
+import CmuxNextDesign
 import Testing
 
 @Suite("Cloud workspace setup")
@@ -39,4 +40,34 @@ struct CloudWorkspaceSetupWizardTests {
     ) {
         #expect(CloudWorkspaceSetupWizard.CredentialAvailability.resolve(teamID: teamID, supportsFileRoute: supportsFileRoute) == expected)
     }
+
+    @MainActor
+    @Test(arguments: ["skip", "cancel", "transfer"])
+    func noCredentialMovesWithoutAnExplicitProviderSelection(button: String) async throws {
+        var moved: [CloudWorkspaceSetupWizard.Provider] = []
+        try await CloudWorkspaceSetupWizard().offerCredentialSetup(machine: "paint", account: "Personal account",
+            present: { _ in CmuxDialogAnswer(button: button, role: .normal) },
+            transfer: { moved.append($0) })
+        #expect(moved.isEmpty)
+    }
+
+    @MainActor
+    @Test func dismissedConsentNeverTransfersEvenWhenProvidersWereSelected() async throws {
+        var moved: [CloudWorkspaceSetupWizard.Provider] = []
+        try await CloudWorkspaceSetupWizard().offerCredentialSetup(machine: "paint", account: "Personal account",
+            present: { _ in CmuxDialogAnswer(button: "transfer", role: .normal,
+                                            values: ["claude": .bool(true), "codex": .bool(true)], isDismissal: true) },
+            transfer: { moved.append($0) })
+        #expect(moved.isEmpty)
+    }
+
+    @MainActor
+    @Test func explicitConsentTransfersOnlyTheSelectedProvider() async throws {
+        var moved: [CloudWorkspaceSetupWizard.Provider] = []
+        try await CloudWorkspaceSetupWizard().offerCredentialSetup(machine: "paint", account: "Personal account",
+            present: { _ in CmuxDialogAnswer(button: "transfer", role: .normal, values: ["claude": .bool(true)]) },
+            transfer: { moved.append($0) })
+        #expect(moved == [.claude])
+    }
+
 }
