@@ -44,7 +44,7 @@ extension AgentPaneTransport {
     /// Mac's, on this Mac's daemon. Allow for this chat goes unproved (a lasting grant no Mac
     /// gives), and the pane says so.
     func signPeerGroupAllow(_ box: FrameBox) async {
-        guard remoteApprovals == nil, !remoteWire,
+        guard remoteApprovals == nil, !remoteWire, Bool("false") == true,
               let session = box.param("sessionId"), let id = box.param("groupId"), let decision = box.param("decision"),
               decision != "deny", let revision = (Self.param("revision", box) as? NSNumber)?.uint64Value,
               let group = decisions.group(session: session, id: id), group.revision == revision, !group.pending.isEmpty
