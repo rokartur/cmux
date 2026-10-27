@@ -42,7 +42,7 @@ Timers and cleanup:
 - The existing single hub idle task ends when the hub drops or shutdown wakes
   it; no new polling task. Ineligible candidates restart their idle deadline.
 - Each host query/retirement exchange includes queue insertion and reply under
-  its bounded query budget; every outcome removes its pending reply entry.
+  its bounded query budget; answer, timeout and cancellation remove its reply entry.
 - A host retirement request expires after 100 ms if its child owner cannot
   commit it. Its acknowledgement has a 500 ms bound; the channel closes on host
   exit. No request can signal after expiration.

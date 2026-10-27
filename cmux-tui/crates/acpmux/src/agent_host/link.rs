@@ -245,6 +245,17 @@ pub fn settle_receipts_of(incarnation: &str) {
 /// A frame, a receipt once it is in the socket, and the fence of the message it carries.
 type Outgoing = (ControllerFrame, Option<oneshot::Sender<()>>, Option<crate::agent::Fence>);
 
+/// A cancelled caller removes its reply slot too, not only a timeout or answer.
+struct QuerySlot {
+    queries: Queries,
+    id: u64,
+}
+impl Drop for QuerySlot {
+    fn drop(&mut self) {
+        self.queries.lock_or_recover().remove(&self.id);
+    }
+}
+
 pub struct Link {
     tx: mpsc::Sender<Outgoing>,
     queries: Queries,
@@ -525,12 +536,12 @@ impl Link {
         let id = self.next_query.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         let (tx, rx) = oneshot::channel();
         self.queries.lock_or_recover().insert(id, tx);
+        let _slot = QuerySlot { queries: self.queries.clone(), id };
         let result = within("query", budget, async {
             self.send(ControllerFrame::Query { id }).await?;
             rx.await.map_err(|_| anyhow!("agent host closed before it answered"))
         })
         .await;
-        self.queries.lock_or_recover().remove(&id);
         result?
     }
 
@@ -539,6 +550,7 @@ impl Link {
         let id = self.next_query.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         let (tx, rx) = oneshot::channel();
         self.queries.lock_or_recover().insert(id, tx);
+        let _slot = QuerySlot { queries: self.queries.clone(), id };
         let result = within("hibernate", QUERY_BUDGET, async {
             self.send(ControllerFrame::Hibernate {
                 id,
@@ -549,7 +561,6 @@ impl Link {
             Ok::<_, anyhow::Error>(rx.await?.idle_generation == Some(generation))
         })
         .await;
-        self.queries.lock_or_recover().remove(&id);
         result?
     }
 
