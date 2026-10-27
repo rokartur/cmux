@@ -1,6 +1,7 @@
 import AppKit
 import CmuxNextActions
 import CmuxNextCloud
+import CmuxNextCompat
 import CmuxNextDesign
 import CmuxNextDaemon
 
@@ -63,22 +64,22 @@ struct CloudWorkspaceSetupWizard {
         let cloud = context.services.cloud
         let supportsFileRoute = cloud.configuration.linkSource == .legacy
         let availability = CredentialAvailability.resolve(teamID: cloud.auth.teamID, supportsFileRoute: supportsFileRoute)
-        let lines = [Strings.setupSummary, Strings.credentialsNote(availability)]
+        let lines = [CloudWorkspaceSetupWizardStrings.setupSummary, CloudWorkspaceSetupWizardStrings.credentialsNote(availability)]
         let spec = CmuxDialogSpec(
-            title: Strings.title,
+            title: CloudWorkspaceSetupWizardStrings.title,
             lines: lines,
             fields: [
-                .choice(id: Field.source, label: Strings.sourceLabel,
+                .choice(id: Field.source, label: CloudWorkspaceSetupWizardStrings.sourceLabel,
                         options: [
-                            CmuxDialogOption(label: Strings.emptyChoice, value: Source.empty.rawValue),
-                            CmuxDialogOption(label: Strings.repositoryChoice, value: Source.repository.rawValue),
+                            CmuxDialogOption(label: CloudWorkspaceSetupWizardStrings.emptyChoice, value: Source.empty.rawValue),
+                            CmuxDialogOption(label: CloudWorkspaceSetupWizardStrings.repositoryChoice, value: Source.repository.rawValue),
                         ], selected: Source.empty.rawValue),
-                .text(Field.repository, initial: "", label: Strings.repositoryLabel,
-                      placeholder: Strings.repositoryPlaceholder),
+                .text(Field.repository, initial: "", label: CloudWorkspaceSetupWizardStrings.repositoryLabel,
+                      placeholder: CloudWorkspaceSetupWizardStrings.repositoryPlaceholder),
             ],
             buttons: [
-                .cancel(Strings.cancel),
-                CmuxDialogButton(id: "create", title: Strings.create, role: .default),
+                .cancel(CloudWorkspaceSetupWizardStrings.cancel),
+                CmuxDialogButton(id: "create", title: CloudWorkspaceSetupWizardStrings.create, role: .default),
             ],
             identifier: "cmux.dialog.cloud.workspaceSetup")
         let answer = await CmuxDialogCenter.shared.present(spec, in: scope(context))
@@ -91,9 +92,9 @@ struct CloudWorkspaceSetupWizard {
         } catch let error as CloudMachineRepo.Invalid {
             let detail: String
             switch error {
-            case .unrecognized: detail = Strings.repositoryInvalid
-            case .credentialsInURL: detail = Strings.repositoryCredentials
-            case .invalidRef: detail = Strings.repositoryRefInvalid
+            case .unrecognized: detail = CloudWorkspaceSetupWizardStrings.repositoryInvalid
+            case .credentialsInURL: detail = CloudWorkspaceSetupWizardStrings.repositoryCredentials
+            case .invalidRef: detail = CloudWorkspaceSetupWizardStrings.repositoryRefInvalid
             }
             CloudPresenter.failure(ActionFailure(message: detail), in: context.services.windows.active?.window)
             return nil
@@ -114,15 +115,15 @@ struct CloudWorkspaceSetupWizard {
         guard availability == .available, let userID else { return }
 
         let spec = CmuxDialogSpec(
-            title: Strings.credentialTitle(session.machine.title),
-            lines: [Strings.credentialDisclosure(session.machine.title, cloud.auth.activeTeam.team?.displayName ?? Strings.personalAccount)],
+            title: CloudWorkspaceSetupWizardStrings.credentialTitle(session.machine.title),
+            lines: [CloudWorkspaceSetupWizardStrings.credentialDisclosure(session.machine.title, cloud.auth.activeTeam.team?.displayName ?? CloudWorkspaceSetupWizardStrings.personalAccount)],
             fields: [
-                .check(id: "claude", title: Strings.setupClaude, on: false),
-                .check(id: "codex", title: Strings.setupCodex, on: false),
+                .check(id: "claude", title: CloudWorkspaceSetupWizardStrings.setupClaude, on: false),
+                .check(id: "codex", title: CloudWorkspaceSetupWizardStrings.setupCodex, on: false),
             ],
             buttons: [
-                CmuxDialogButton(id: "skip", title: Strings.skip, role: .default),
-                CmuxDialogButton(id: "transfer", title: Strings.transferAndFinish, role: .normal),
+                CmuxDialogButton(id: "skip", title: CloudWorkspaceSetupWizardStrings.skip, role: .default),
+                CmuxDialogButton(id: "transfer", title: CloudWorkspaceSetupWizardStrings.transferAndFinish, role: .normal),
             ],
             identifier: "cmux.dialog.cloud.workspaceCredentials")
         let answer = await CmuxDialogCenter.shared.present(spec, in: scope(context))
@@ -146,9 +147,9 @@ struct CloudWorkspaceSetupWizard {
                                        currentUserID: { cloud.auth.user?.id }, confirmed: true)
             }
         } catch let failure as CloudCredentialTransfer.Failure {
-            CloudPresenter.show(Strings.credentialFailedTitle, Strings.credentialFailure(failure), in: context.services.windows.active?.window)
+            CloudPresenter.show(CloudWorkspaceSetupWizardStrings.credentialFailedTitle, CloudWorkspaceSetupWizardStrings.credentialFailure(failure), in: context.services.windows.active?.window)
         } catch {
-            CloudPresenter.show(Strings.credentialFailedTitle, Strings.credentialFailed, in: context.services.windows.active?.window)
+            CloudPresenter.show(CloudWorkspaceSetupWizardStrings.credentialFailedTitle, CloudWorkspaceSetupWizardStrings.credentialFailed, in: context.services.windows.active?.window)
         }
     }
 
@@ -166,7 +167,7 @@ struct CloudWorkspaceSetupWizard {
     }
 }
 
-private enum Strings {
+private enum CloudWorkspaceSetupWizardStrings {
     static let title = String(localized: "cloud.workspaceSetup.title", defaultValue: "New Cloud Workspace", table: "Cloud", bundle: .module)
     static let setupSummary = String(localized: "cloud.workspaceSetup.summary", defaultValue: "Choose a starting point. A repository is cloned into ~/work on the new VM; no credential is stored in the repository URL.", table: "Cloud", bundle: .module)
     static let sourceLabel = String(localized: "cloud.workspaceSetup.sourceLabel", defaultValue: "Start with", table: "Cloud", bundle: .module)
