@@ -783,6 +783,23 @@ nonisolated extension Feature {
         runtimeMutable: false
     )
 
+    /// Every agent chat's cmux MCP server becomes a small stdio relay to one shared cmux MCP host per app build, which keeps the app's action catalog once instead of once per agent; the host exits 5 minutes after its last agent leaves.
+    public static let mcpCatalogHost = Feature(
+        index: 44,
+        name: "mcpCatalogHost",
+        owner: "PL-memory",
+        description: "Every agent chat's cmux MCP server becomes a small stdio relay to one shared cmux MCP host per app build, which keeps the app's action catalog once instead of once per agent; the host exits 5 minutes after its last agent leaves.",
+        kind: .perfPath,
+        process: .daemon,
+        chromiumFeature: nil,
+        defaults: FeatureDefaults(dev: false, nightly: false, release: false),
+        expires: "2026-12-20",
+        params: [],
+        stories: ["acpmux-overhead"],
+        sticky: false,
+        runtimeMutable: false
+    )
+
     /// acpmux and its TUI follow system memory pressure: at warning they empty caches rebuilt on demand (parsed login files, idle chats' error tails, the TUI's transcript layout); at critical they also drop live model lists and each chat's prompt outcomes past its newest 8.
     public static let memoryAcpmuxPressure = Feature(
         index: 45,
@@ -2105,6 +2122,7 @@ nonisolated extension Feature {
         .launchWindowsByOcclusion,
         .leftoverDaemonIdleExit,
         .mainJobGate,
+        .mcpCatalogHost,
         .memoryAcpmuxPressure,
         .memoryAgentAndControlCaches,
         .memoryAppCaches,
@@ -2227,6 +2245,7 @@ nonisolated extension Feature {
         .launchWindowsByOcclusion,
         .leftoverDaemonIdleExit,
         .mainJobGate,
+        .mcpCatalogHost,
         .memoryAcpmuxPressure,
         .memoryAgentAndControlCaches,
         .memoryAppCaches,
