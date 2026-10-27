@@ -476,9 +476,41 @@ enum ActiveLookScope {
     }
 
     /// Routes `NSWindow._hasActiveAppearanceIgnoringKeyFocus` through the scope, once.
+    static func spy(_ name: String) {
+        let sel = NSSelectorFromString(name)
+        guard let m = class_getInstanceMethod(NSWindow.self, sel) else { dlog("nospy \(name)"); return }
+        typealias G = @convention(c) (NSWindow, Selector) -> Bool
+        let prev = unsafeBitCast(method_getImplementation(m), to: G.self)
+        let blk: @convention(block) (NSWindow) -> Bool = { w in
+            let r = prev(w, sel)
+            if pthread_main_np() != 0 { MainActor.assumeIsolated { spyLog(name, w, r) } }
+            return r
+        }
+        method_setImplementation(m, imp_implementationWithBlock(blk))
+    }
+    static func spyLog(_ name: String, _ w: NSWindow, _ r: Bool) {
+        guard keyChanges > 0, String(describing: type(of: w)) == "ShellWindow" else { return }
+        var fr = [UnsafeMutableRawPointer?](repeating: nil, count: 40)
+        let n = Int(fr.withUnsafeMutableBufferPointer { backtrace($0.baseAddress, 40) })
+        var reader = "?"
+        var swiftUI = false
+        for i in 0..<n {
+            var info = Dl_info()
+            guard dladdr(fr[i], &info) != 0, let f = info.dli_fname else { continue }
+            let path = String(cString: f)
+            if reader == "?", path.hasSuffix("/AppKit") { reader = info.dli_sname.map { String(cString: $0) } ?? "?"; reader += "+\(UInt(bitPattern: fr[i]) - UInt(bitPattern: info.dli_saddr))" }
+            if path.hasSuffix("/SwiftUICore") || path.hasSuffix("/SwiftUI") { swiftUI = true }
+        }
+        let key = "S kc=\(keyChanges) \(name)=\(r) tags=\(tags.suffix(3)) sui=\(swiftUI) reader=\(reader.prefix(90))"
+        spySeen[key, default: 0] += 1
+        if spySeen[key] == 1 { dlog(key) }
+    }
+    static var spySeen: [String: Int] = [:]
+
     static func install() {
         guard !installed else { return }
         installed = true
+        for name in ["_hasActiveAppearance", "_hasKeyAppearance", "isKeyWindow", "isMainWindow", "_hasMainAppearance", "_isActive"] { spy(name) }
         let selector = NSSelectorFromString("_hasActiveAppearanceIgnoringKeyFocus")
         guard let method = class_getInstanceMethod(NSWindow.self, selector) else { return }
         let original = unsafeBitCast(method_getImplementation(method), to: Getter.self)
@@ -506,7 +538,7 @@ enum ActiveLookScope {
                         if tags.isEmpty {
                             extra = " | " + Thread.callStackSymbols.dropFirst(10).filter { $0.contains("cmux DEV") && !$0.contains("TR +") }.prefix(5).map { l -> String in let p = l.split(separator: " ", omittingEmptySubsequences: true); return p.count > 3 ? String(p[3...].joined(separator: " ").prefix(70)) : l }.joined(separator: " < ")
                         }
-                        dlog("M kc=\(keyChanges) tags=\(tags.suffix(3)) in=\(windows.last == ObjectIdentifier(window)) a=\(answer) -> \(result)\(extra)")
+                        if false { dlog("M kc=\(keyChanges) tags=\(tags.suffix(3)) in=\(windows.last == ObjectIdentifier(window)) a=\(answer) -> \(result)\(extra)") }
                     }
                 }
                 return result
