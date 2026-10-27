@@ -2542,6 +2542,27 @@ class Nightly(unittest.TestCase):
         self.assertNotIn("rerun-failed", api.calls)
         self.assertIn("watch limit reached with a started nightly still running", summary)
 
+    def test_a_sibling_that_starts_after_the_look_is_never_cancelled(self):
+        # assess() saw nothing else running; by the cancel a Linux job (no owned or Blacksmith label) runs.
+        for newer, moved in (((), False), ([RUN_ID + 7], True)):
+            clock = Clock()
+            linux = job("publish-nightly", labels=["blacksmith-2vcpu-ubuntu-2404"], status="in_progress",
+                        runner="linux")
+            api = NightlyAPI(clock, lambda seconds: nightly_run(helper_done_at=0)(seconds) + [linux],
+                             newer=newer)
+            target = rescue.Target(RUN_ID, 1, HEAD, 0, side=True, nightly=True, path=rescue.NIGHTLY_WORKFLOW_PATH)
+            result = rescue.rescue(api, target, now=clock.now, sleep=clock.sleep, log=lambda _: None,
+                                   failed_only=True)
+            self.assertNotIn("cancel", api.calls, moved)
+            self.assertIn("publish-nightly of this nightly are running", result)
+
+    def test_a_linux_sibling_blocks_the_look_too(self):
+        jobs = nightly_run(helper_done_at=0)(30 * 60) + [
+            job("publish-nightly", labels=["blacksmith-2vcpu-ubuntu-2404"], status="in_progress", runner="linux")]
+        look = rescue.assess(jobs, now=START + dt.timedelta(seconds=30 * 60), budget_seconds=30, reserved=True)
+        self.assertEqual(look.action, "watch")
+        self.assertIn("a started nightly is never cancelled", look.reason)
+
     def test_a_stuck_build_behind_which_a_newer_nightly_waits_is_cancelled_not_rerun(self):
         # nightly.yml never cancels in progress: the newer run is pending behind
         # this one, and a re-run would join the group and cancel it.

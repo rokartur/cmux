@@ -2212,6 +2212,20 @@ def pull_moved(api: GitHub, target: Target, sleep: Callable[[float], None],
     return ""
 
 
+def started_nightly_work(api: GitHub, target: Target, sleep: Callable[[float], None],
+                         log: Callable[[str], None]) -> str:
+    """For a nightly, the jobs of it running right now (any pool: owned, Blacksmith, Linux), read just before a
+    cancel: a started nightly is never cancelled for a slow runner or a newer tip. "" when none (or not a nightly).
+
+    assess() checked the same on its look, but a sibling can start between that look and the cancel."""
+    if not target.nightly:
+        return ""
+    jobs = read(lambda: api.jobs(target.run_id, target.attempt), sleep, log)
+    running = sorted(str(job.get("name") or job.get("id")) for job in jobs
+                     if job.get("status") == "in_progress" and not in_setup(job))
+    return ", ".join(running)
+
+
 def rescue(api: GitHub, target: Target, *, now: Callable[[], dt.datetime], sleep: Callable[[float], None],
            log: Callable[[str], None], failed_only: bool = False,
            deadline: dt.datetime | None = None, refused: bool | None = None, refusal: bool = False) -> str:
@@ -2248,6 +2262,9 @@ def rescue(api: GitHub, target: Target, *, now: Callable[[], dt.datetime], sleep
             return "not rescued: someone else already re-ran the run"
         if run.get("status") == "completed":
             return f"not rescued: {moved}"
+        busy = started_nightly_work(api, target, sleep, log)
+        if busy:
+            return f"not rescued: {moved}, but {busy} of this nightly are running; a started nightly is never cancelled"
         api.cancel(target.run_id)
         return f"cancelled run {target.run_id}, not re-run: {moved}"
     if moved:
@@ -2284,6 +2301,9 @@ def rescue(api: GitHub, target: Target, *, now: Callable[[], dt.datetime], sleep
         slot = started_dev_compile(jobs)
         if slot:
             return f"not rescued: a DEV feed compile started on {slot}; a started dev build is never cancelled"
+    busy = started_nightly_work(api, target, sleep, log)
+    if busy:
+        return f"not rescued: {busy} of this nightly are running; a started nightly is never cancelled"
     api.cancel(target.run_id)
     log(f"cancelled run {target.run_id}")
     started = now()
