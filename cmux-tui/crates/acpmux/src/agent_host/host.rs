@@ -543,7 +543,7 @@ impl Started {
                     // The frozen end path (`terminate_unadoptable`): end the
                     // harness while its group is still ours, then the host.
                     if state.idle_pid_only.load(std::sync::atomic::Ordering::SeqCst) {
-                        break;
+                        continue; // The child owner's bounded grace must finish before runtime exit.
                     }
                     state.note_under();
                     if state.leader_alive.load(std::sync::atomic::Ordering::SeqCst)
@@ -584,11 +584,8 @@ impl Started {
                 Event::Frame(id, frame) => state.on_frame(id, frame).await,
                 Event::Written(receipt, written) => state.receipt(receipt, written),
             }
-            if state.unadoptable {
+            if state.unadoptable && !state.idle_pid_only.load(std::sync::atomic::Ordering::SeqCst) {
                 // As SIGTERM: end the harness while its group is ours, then the host.
-                if state.idle_pid_only.load(std::sync::atomic::Ordering::SeqCst) {
-                    break;
-                }
                 state.note_under();
                 if state.leader_alive.load(std::sync::atomic::Ordering::SeqCst)
                     && let Some(pg) = state.pgid
@@ -598,7 +595,9 @@ impl Started {
                 }
                 break;
             }
-            if state.finished() {
+            if state.finished()
+                || (state.unadoptable && state.controller.is_none() && state.exit_h.is_some())
+            {
                 break;
             }
             let wanted = !state.stdout_done && state.weight <= state.spec.buffer_cap;

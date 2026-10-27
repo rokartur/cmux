@@ -16,6 +16,7 @@ async fn idle_pid_only_host_query_fences_activity_and_preserves_children() {
     let dir = scratch("idle");
     let probe = tokio::net::UnixDatagram::bind(dir.join("probe")).unwrap();
     let mut launch = spec(&dir, "idle");
+    launch.env.push(("FAKE_CLAUDE_IGNORE_TERM".into(), "1".into()));
     launch.env.push((
         "FAKE_CLAUDE_IDLE_PROBE_SOCKET".into(),
         dir.join("probe").to_string_lossy().into_owned(),
@@ -50,7 +51,9 @@ async fn idle_pid_only_host_query_fences_activity_and_preserves_children() {
     read_until(&owner, &mut h, |e| is_response(e, 2)).await;
     assert!(!owner.hibernate(stale, Duration::from_millis(20)).await.unwrap());
     let current = owner.query().await.unwrap().idle_generation.unwrap();
-    assert!(owner.hibernate(current, Duration::from_millis(20)).await.unwrap());
+    assert!(owner.hibernate(current, Duration::from_millis(200)).await.unwrap());
+    // A host signal during grace must not cancel its owner before the exact-child KILL.
+    assert_eq!(unsafe { libc::kill(record.host_pid as i32, libc::SIGTERM) }, 0);
     read_until(&owner, &mut h, |e| matches!(e, Entry::Exit { .. })).await;
     wait_dead(death).await;
     for pid in &children.0 {

@@ -503,7 +503,9 @@ while True:
             import time
             time.sleep(int(os.environ["FAKE_CLAUDE_MODE_DELAY_MS"]) / 1000)
         if request.get("subtype") == "initialize" and os.environ.get("FAKE_CLAUDE_IDLE_CHILDREN"):
-            import subprocess
+            import subprocess, signal
+            if os.environ.get("FAKE_CLAUDE_IGNORE_TERM"):
+                signal.signal(signal.SIGTERM, signal.SIG_IGN)
             code = "import signal,socket,os,time; signal.signal(signal.SIGUSR1, lambda *_: socket.socket(socket.AF_UNIX,socket.SOCK_DGRAM).sendto(str(os.getpid()).encode(), os.environ['FAKE_CLAUDE_IDLE_PROBE_SOCKET'])); print('ready',flush=True); time.sleep(600)"
             children = []
             for escape in (False, True):
